@@ -102,3 +102,4 @@ web/vendor/ai-style/siglip2-base-patch16-224-image-fp16.onnx
 web/vendor/ai-detail/*.onnx
 web/vendor/ai-detail/*.onnx_data
 web/vendor/ai-detail/*.partial
+research
