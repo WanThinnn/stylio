@@ -55,6 +55,7 @@ The detailed material that used to make this README very long now lives in `docs
 - [Browser setup, compatibility and architecture](docs/web/browser-guide.md)
 - [Photo processing, Portrait, HDR and DNG notes](docs/web/processing-guide.md)
 - [AI model assets](docs/models/ai-assets.md)
+- [Adaptive Styles training workspace (v1.1.0 research)](research/adaptive-styles/README.md)
 - [CLI, upstream Shalielie heritage and reverse-engineering notes](docs/project/upstream-cli-and-research.md)
 - [Technical findings and device experiments](facts.md)
 

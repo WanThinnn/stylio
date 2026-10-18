@@ -1,0 +1,20 @@
+.venv/
+.uv-cache/
+.ipynb_checkpoints/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+
+# Protect imports placed anywhere under data/, including manually named folders.
+# Only folder markers and metadata templates are tracked, never user photos or TSVs.
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+!/data/metadata/*.example.csv
+/outputs/**
+!/outputs/.gitkeep
+/exports/**
+!/exports/.gitkeep

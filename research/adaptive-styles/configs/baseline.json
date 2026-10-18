@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "experiment": "adaptive-styles-v1.1.0-baseline",
+  "status": "implemented_research_baseline_not_production_validated",
+  "seed": 42,
+  "data_root": "data/raw",
+  "inventory": "data/processed/inventory.csv",
+  "prepared_dataset": "data/processed/baseline-v1",
+  "prepared_manifest": "data/processed/baseline-v1/manifest.json",
+  "labels": "data/processed/baseline-v1/labels.jsonl",
+  "run_directory": "outputs/baseline-v1",
+  "sources": "data/metadata/sources.csv",
+  "pairs": "data/metadata/pairs.csv",
+  "app_style_catalog": "../../tools/style-prototype-prompts.json",
+  "app_parameter_contract": "../../web/src/recommend/style-selection.js",
+  "outputs": ["styleId", "tone", "color", "palette", "confidence"],
+  "parameter_bounds": {"tone": [-1, 1], "color": [-1, 1], "palette": [0, 1]},
+  "split": {
+    "unit": "scene_or_burst_group",
+    "train": 0.8,
+    "validation": 0.1,
+    "test": 0.1,
+    "freeze_before_augmentation": true
+  },
+  "model": {
+    "architecture": "mobilenet_v3_small_features_128d_heads",
+    "teacher": "OpenAI CLIP ViT-B/32 + LAION aesthetic predictor V1",
+    "weights": "torchvision MobileNet_V3_Small_Weights.IMAGENET1K_V1",
+    "input_size": 224,
+    "confidence": "uncalibrated label-agreement softmax"
+  },
+  "training": {
+    "loss": "soft-target cross entropy + 2 * probability-weighted SmoothL1",
+    "learning_rate": 0.0001,
+    "epochs": 20,
+    "batch_size": 8,
+    "gradient_accumulation": 4,
+    "warmup_epochs": 1,
+    "finetune_last_blocks": 3,
+    "mixed_precision": "CUDA fp16 AMP",
+    "num_workers": 0
+  }
+}
