@@ -82,10 +82,6 @@ export async function patch(targetData, profile, opts = {}) {
   const nativePortraitRebuild=opts.portraitStyleRebuild===true&&td.stylesItem===null
     &&nativeStyleCapture
     &&nativePortraitBaseState(targetData,td)!==null;
-  const evidence=opts.sharpBackgroundEvidence;
-  const measuredSharp=evidence?.method==='native-background-detail-v1'
-    &&Number.isInteger(evidence.detailedTiles)&&evidence.detailedTiles>=3
-    &&Number.isInteger(evidence.farTiles)&&evidence.farTiles>=evidence.detailedTiles;
   // A capture can retain its selected Style even when an export omitted the
   // Styles auxiliary graph. Keep that selection when adding the missing graph.
   let selection,selectionCompatibility;
@@ -109,10 +105,11 @@ export async function patch(targetData, profile, opts = {}) {
   }
   if(selection){
     let payload=selection.payload;
-    // K was phone-tested on an incomplete 16 Pro Bright export with these
-    // adjustments and ISO HDR parameters. Automatic use requires measured
-    // sharp-background evidence; diagnostic callers can explicitly request it.
-    if((opts.reconstructedBright===true||(nativePortraitRebuild&&measuredSharp))&&td.stylesItem===null
+    // K was phone-tested as a research compatibility experiment, but changing a
+    // real source 0x54 also changes the user's selected Style/Tone/Colour state.
+    // Never do that automatically, including for Portrait rebuilds. Keep this
+    // branch explicit-diagnostic only; production source selection is immutable.
+    if(opts.reconstructedBright===true&&td.stylesItem===null
       &&cameraModel==='iPhone 16 Pro'
       &&marker.get('4')===16&&marker.get('1')===-0.5&&marker.get('2')===0.5
       &&editableTmapHeadroom(targetData,td)!==null){
@@ -124,13 +121,13 @@ export async function patch(targetData, profile, opts = {}) {
         payload=buildBplist(neutral);selectionCompatibility='bright-palette70';
       }
     }
-    // Missing native calibration cannot be faithfully reconstructed from a
-    // preset label. Use the tested Bright compromise only on a sharp base;
-    // otherwise use upstream's neutral Standard rather than double-applying it.
-    if(nativePortraitRebuild&&!selectionCompatibility){payload=profile.mn54;selectionCompatibility='portrait-standard';}
+    // The edited/captured 0x54 is the user's source-of-truth selection. Portrait
+    // graph reconstruction may add missing resources but must not normalize that
+    // selection to Standard or any preset compromise. This preserves Style ID,
+    // Tone, Colour and Palette exactly.
+    if(nativePortraitRebuild&&!selectionCompatibility)selectionCompatibility='portrait-source-selection';
     profile={...profile,mn54:payload,
-      manifest:{...profile.manifest,smartstyle_makernote_type:selectionCompatibility==='portrait-standard'
-        ?profile.manifest.smartstyle_makernote_type??7:selection.type}};
+      manifest:{...profile.manifest,smartstyle_makernote_type:selection.type}};
   }
   else if(compatibilityStyleFallback)selectionCompatibility='legacy-profile-marker';
   else if(nativePortraitRebuild)selectionCompatibility='portrait-standard';
@@ -144,7 +141,14 @@ export async function patch(targetData, profile, opts = {}) {
   }
   const hasHdr = td.hdrGrid !== null && (td.infos.get(td.hdrGrid)?.type === "hvc1" || td.hdrTiles.length > 0);
   if (!hasHdr && !opts.experimental) throw new Error(UNSUPPORTED);
-  if ((td.thumbnail === null && !opts.linearThumb) || td.exifItem === null) throw new Error(UNSUPPORTED);
+  const hasIsoHdrPair=td.hdrGrid!==null&&[...td.infos].some(([id,info])=>info.type==='tmap'
+    &&td.refs.some(ref=>ref.type==='dimg'&&ref.from===id&&ref.to.length===2
+      &&ref.to[0]===td.primary&&ref.to[1]===td.hdrGrid));
+  if(td.linearThumb===null&&!opts.linearThumb){
+    if(hasIsoHdrPair)throw new Error('HDR Styles reconstruction requires an HDR-aware linear thumbnail');
+    throw new Error(UNSUPPORTED);
+  }
+  if(td.exifItem===null)throw new Error(UNSUPPORTED);
 
   // v0.6.2: the photo's own item graph whenever its StyleDeltaMap size is known.
   if (opts.graph !== "donor" && styleDeltaSize(...dimensionsForItem(td.props, td.primary), opts.experimental === true)) {

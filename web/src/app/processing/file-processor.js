@@ -7,7 +7,7 @@ import {decodeToRgb,releaseDecodeCache} from '../../media/decode.js';
 import {photoContentIdentifier,createLivePhotoExport} from '../../media/live-photo.js';
 import {RASTER_MIMES} from '../../media/image-format.js';
 import {photoCaptureDate} from '../../media/photo-date.js';
-import {preserveNativeStyles,styleReconstructionRisk,nativeTextureCapture} from '../../styles/style-preservation.js';
+import {preserveNativeStyles,styleReconstructionRisk,nativeTextureCapture,nativeStyleExportTextureCandidate,useTextureOnlyNativeStylePath} from '../../styles/style-preservation.js';
 import {releaseHevcEncoder} from '../../codecs/ffmpeg-hevc.js';
 import {releaseHevcEncoder as releaseRasterEncoder} from '../../raster/ffmpeg-hevc.js';
 import {readImageFile,addTextureInWorker,repairTextureInWorker,restoreNativePortraitInWorker,legacyCompatibilityInWorker,patchInWorker,releaseHeicProcessor} from '../../media/heic-processing.js';
@@ -171,17 +171,21 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
       overall(36);
       const textureOnly=unknownAppleContract?false:preserveNativeStyles(bytes,d);
       const nativeTexture=unknownAppleContract?false:nativeTextureCapture(bytes,d);
+      // Proven iPhone 16/17 "Current" exports keep the user's six-key Style
+      // selection + ISO HDR but omit the standalone Styles graph. They are the
+      // only incomplete non-Portrait shape allowed into reconstruction.
+      const editedStyleExportCandidate=unknownAppleContract?false:nativeStyleExportTextureCandidate(bytes,d);
       let portraitState=null;
       if(!unknownAppleContract){
         const {nativePortraitBaseState}=await import('../../portrait/ai-portrait-container.js');
         portraitState=nativePortraitBaseState(bytes,d);
       }
       const rebuildNativePortrait=!legacyRecovery&&!preserveFuture&&textureOnly&&d.stylesItem===null&&portraitState!==null;
-      let preserveIncomplete = preserveFuture || (!legacyRecovery&&textureOnly&&d.stylesItem===null&&!rebuildNativePortrait);
+      let preserveIncomplete = preserveFuture || (!legacyRecovery&&textureOnly&&d.stylesItem===null&&!rebuildNativePortrait&&!editedStyleExportCandidate);
       let compatibilityRecovered=false;
       let sharpBackgroundEvidence=null;
       let restorePortrait=!legacyRecovery&&!preserveFuture&&portraitState==='legacy-photo-base';
-      if (!unknownAppleContract&&styleReconstructionRisk(bytes,d)&&!rebuildNativePortrait) ui.note(T('warn.textureonly'),'style-rebuild');
+      if (!unknownAppleContract&&styleReconstructionRisk(bytes,d)&&!rebuildNativePortrait&&!editedStyleExportCandidate) ui.note(T('warn.textureonly'),'style-rebuild');
       let liveIdentifier=null;
       try{liveIdentifier=photoContentIdentifier(bytes);}
       catch(error){
@@ -217,7 +221,7 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
           const index=await ensureProfileIndex(),name=profileFor(index,d,needsExperimental);
           const profile=await getProfile(name);
           let linearThumb=undefined;
-          if(d.thumbnail===null){
+          if(d.linearThumb===null){
             if(!globalThis.crossOriginIsolated)throw Error('Compatibility thumbnail generation requires cross-origin isolation');
             const {generateLinearThumbnail}=await import('../../codecs/linear-thumbnail.js');
             linearThumb=await generateLinearThumbnail(bytes,progress=>{
@@ -271,16 +275,16 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
         bits=[T('st.native'),T('st.texture')];
         suffix='_Preserved.HEIC';
       } else if (preserveIncomplete) {
-        // A selected preset is not the Styles editing graph. Adding Texture alone
-        // advertises a new renderer without the colour resources it needs. Keep
-        // this incomplete native export intact and register only its own HDR map.
-        overall(42);({data} = await repairTextureInWorker(bytes,{preserveStyles:true}));overall(58);
-        data ||= bytes;
-        bits = [T('st.original')];
-        suffix = '_Preserved.HEIC';
-      } else if ((textureOnly&&!rebuildNativePortrait) || d.stylesItem !== null) {
-        // A native iPhone 16/17 style photo is never re-ported (that would replace its real
-        // style data); it only gets the iOS 27 Texture/Grain set added.
+        // The reported source still exposes Styles when reimported. Both HDR
+        // registration and Texture-only injection made Photos fall back to
+        // Filters on-device. Preserve this native export exactly.
+        overall(42);data=bytes;overall(58);
+        bits=[T('st.original')];suffix='_Preserved.HEIC';
+      } else if (useTextureOnlyNativeStylePath({textureOnly,rebuildNativePortrait,editedStyleExportCandidate,stylesItem:d.stylesItem})) {
+        // Complete native Styles graphs are never re-ported. Incomplete iPhone 16/17
+        // Current exports are the exception: they must reconstruct the missing editor
+        // graph below, using the source selection + HDR-aware linear thumbnail.
+        // All other native Style photos only receive the iOS 27 Texture/Grain set.
         overall(42);ui.set(T("st.working"));
         if (hasTexture(d.infos)) {
           ({data} = await repairTextureInWorker(bytes,{preserveStyles:textureOnly}));overall(58);
@@ -299,9 +303,10 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
         overall(38);const index=await ensureProfileIndex();
         const name = profileFor(index, d, needsExperimental);
         const profile = await getProfile(name);
-        // Start processing; if the thumbnail is missing, dynamically load the generator.
+        // Start processing; if the Styles linear thumbnail is missing, generate it.
+        // An ordinary SDR thumbnail is not a substitute for the HDR-aware linear resource.
         let linearThumb = undefined;
-        if (d.thumbnail === null) {
+        if (d.linearThumb === null) {
 
           if (!globalThis.crossOriginIsolated) { ui.set(T("err.reloadencoder"), "err"); return; }
           const { generateLinearThumbnail } = await import("../../codecs/linear-thumbnail.js");

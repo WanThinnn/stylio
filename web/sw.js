@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v222`;
+const CACHE_NAME = `${CACHE_PREFIX}v227`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -193,6 +193,11 @@ const APP_SHELL = [
   "./src/raster/raster-color.js",
   "./src/raster/raster-import.js",
   "./src/raster/jpeg-hdr.js",
+  "./src/raster/heic-grid-sample.js",
+  "./src/raster/hdr-linear-thumbnail.js",
+  "./src/raster/editable-hdr-pair.js",
+  "./src/raster/hagc.js",
+  "./src/raster/pq-hagc-icc.js",
   "./src/raster/styles.js",
   "./src/raster/synthetic-hevc.js",
   "./src/raster/texture.js",

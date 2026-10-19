@@ -30,6 +30,13 @@ const assets=await generateSyntheticHevc(null,async(_,o)=>{
   const a=o.pixelFormat!=='gray'?fixture.assets.delta:o.width===768?fixture.assets.textureMask:fixture.assets.mask;
   return {...a,hvcc:Uint8Array.from(a.hvcc),payload:Uint8Array.from(a.payload)};
 });
+// Graph reconstruction now requires a real encoded linear resource explicitly.
+// These tests exercise graph/state preservation, so use a portable HEVC fixture
+// instead of invoking the browser's HDR-aware image decoder/encoder.
+const testLinearThumb={sample:Uint8Array.from(fixture.assets.delta.payload),
+  hvcC:Uint8Array.from(fixture.assets.delta.hvcc),
+  ispe:box('ispe',concat([new Uint8Array(4),be(fixture.assets.delta.width,4),be(fixture.assets.delta.height,4)])),
+  pixi:box('pixi',Uint8Array.of(0,0,0,0,3,10,10,10))};
 function photo(width,height,name='48-12'){
   const p=buildGeneratedProfile(name,assets),d=discoverHeic(p.meta),g=targetGeometry({width,height});
   const codec=propertyBoxBytes(p.meta,d.props,d.primaryTiles[0],'hvcC'),payload=Uint8Array.of(0,0,0,4,38,1,0,0);
@@ -251,7 +258,7 @@ test('adding a missing Styles graph preserves a real iPhone 13-15 six-key Bright
   const source=withCamera(withoutThumbnail(withMarker(base,marker),[graph.stylesItem,graph.deltaGrid,graph.linearThumb]),'iPhone 15 Pro');
   assert.equal(discoverHeic(source).stylesItem,null);
   const originalProfile=buildGeneratedProfile('48-12',assets),saved=originalProfile.mn54.slice();
-  const output=await patch(source,originalProfile,{experimental:true});
+  const output=await patch(source,originalProfile,{experimental:true,linearThumb:testLinearThumb});
   assert.deepEqual(selectedStyle(output.data),selectedStyle(source));
   assert.deepEqual(originalProfile.mn54,saved,'cached neutral profile must not inherit another photo selection');
 });
@@ -260,7 +267,7 @@ test('pre-Photographic-Styles iPhones ignore reused 0x54 blobs and receive the g
   const base=photo(900,600),legacy=buildBplist(new Map([['3',1],['1',.18],['4',16],['2',0],['0',1],['5',0]]));
   const graph=discoverHeic(base);
   const source=withCamera(withoutThumbnail(withMarker(base,legacy),[graph.stylesItem,graph.deltaGrid,graph.linearThumb]),'iPhone 7');
-  const profile=buildGeneratedProfile('48-12',assets),output=await patch(source,profile,{experimental:true});
+  const profile=buildGeneratedProfile('48-12',assets),output=await patch(source,profile,{experimental:true,linearThumb:testLinearThumb});
   const selected=parseBplist(selectedStyle(output.data).payload);
   assert.deepEqual([selected.get('0'),selected.get('1'),selected.get('2'),selected.get('3'),selected.get('4'),selected.get('5'),selected.get('6'),selected.get('7')],
     [1,0,0,1,1,1,4,0]);
@@ -274,7 +281,7 @@ test('Suggested Styles overrides legacy iPhone 15 selection but never mutates in
   const recommendation={styleId:11,tone:-.42,color:.16,palette:.88,confidence:.82,level:'pro'};
   const profile15=buildGeneratedProfile('48-12',assets);
   const oldSource=withCamera(incomplete,'iPhone 15 Pro');
-  const oldOut=await patch(oldSource,profile15,{experimental:true,styleRecommendation:recommendation});
+  const oldOut=await patch(oldSource,profile15,{experimental:true,linearThumb:testLinearThumb,styleRecommendation:recommendation});
   const oldSelected=parseBplist(selectedStyle(oldOut.data).payload);
   assert.deepEqual([oldSelected.get('4'),oldSelected.get('1'),oldSelected.get('2'),oldSelected.get('3')],
     [11,-.42,.16,.88]);
@@ -284,7 +291,7 @@ test('Suggested Styles overrides legacy iPhone 15 selection but never mutates in
 
   const profile16=buildGeneratedProfile('48-12',assets);
   const modernSource=withCamera(incomplete,'iPhone 16 Pro');
-  const modernOut=await patch(modernSource,profile16,{experimental:true,styleRecommendation:recommendation});
+  const modernOut=await patch(modernSource,profile16,{experimental:true,linearThumb:testLinearThumb,styleRecommendation:recommendation});
   assert.deepEqual(selectedStyle(modernOut.data),selectedStyle(modernSource));
   assert.equal(modernOut.report.styleRecommendation,undefined);
 });
@@ -584,7 +591,7 @@ test('opt-in Bright reconstruction matches K and carries own HDR headroom withou
   const source=incompleteBrightIso(),before=discoverHeic(source),profile=buildGeneratedProfile('48-12',assets);
   const saved=profile.mn54.slice();
   assert.equal(editableTmapHeadroom(source),4);
-  const output=await executeJob({operation:'patch',data:source,profile,opts:{reconstructedBright:true,experimental:true}});
+  const output=await executeJob({operation:'patch',data:source,profile,opts:{reconstructedBright:true,experimental:true,linearThumb:testLinearThumb}});
   const after=discoverHeic(output.data),marker=parseBplist(selectedStyle(output.data).payload);
   assert.equal(output.report.styleSelectionCompatibility,'bright-palette70');
   assert.deepEqual([marker.get('4'),marker.get('1'),marker.get('2'),marker.get('3')],[16,0,0,.7]);
@@ -604,13 +611,13 @@ test('opt-in Bright reconstruction matches K and carries own HDR headroom withou
   assert.deepEqual(selectedStyle(portrait),selectedStyle(output.data));
 });
 
-test('automatic incomplete native Portrait gains Styles/Texture, with neutral Standard when the base is unknown',async()=>{
+test('automatic incomplete native Portrait gains Styles/Texture while preserving the real source selection',async()=>{
   const source=capture(attachAiDepth(incompleteBrightIso(),depth),12,0),before=discoverHeic(source);
   const profile=buildGeneratedProfile('48-12',assets),saved=profile.mn54.slice();
-  const output=await executeJob({operation:'patch',data:source,profile,opts:{portraitStyleRebuild:true,experimental:true}});
+  const output=await executeJob({operation:'patch',data:source,profile,opts:{portraitStyleRebuild:true,experimental:true,linearThumb:testLinearThumb}});
   const after=discoverHeic(output.data);
-  assert.equal(output.report.styleSelectionCompatibility,'portrait-standard');
-  assert.deepEqual(selectedStyle(output.data).payload,saved);
+  assert.equal(output.report.styleSelectionCompatibility,'portrait-source-selection');
+  assert.deepEqual(selectedStyle(output.data),selectedStyle(source));
   assert.ok(after.stylesItem!==null&&hasTexture(after.infos));
   assert.equal((await executeJob({operation:'native-portrait',data:output.data})).data,null);
   for(const role of ['primaryTiles','hdrTiles'])before[role].forEach((id,i)=>
@@ -626,10 +633,11 @@ test('measured sharp native background restores aperture without altering recons
   const source=capture(attachAiDepth(incompleteBrightIso(),depth),12,0),profile=buildGeneratedProfile('48-12',assets);
   const sharpBackgroundEvidence={method:'native-background-detail-v1',detailedTiles:3,farTiles:16};
   const output=await executeJob({operation:'patch',data:source,profile,
-    opts:{portraitStyleRebuild:true,sharpBackgroundEvidence,experimental:true}});
+    opts:{portraitStyleRebuild:true,sharpBackgroundEvidence,experimental:true,linearThumb:testLinearThumb}});
   const marker=parseBplist(selectedStyle(output.data).payload);
-  assert.equal(output.report.styleSelectionCompatibility,'bright-palette70');
-  assert.deepEqual([marker.get('4'),marker.get('1'),marker.get('2'),marker.get('3')],[16,0,0,.7]);
+  assert.equal(output.report.styleSelectionCompatibility,'portrait-source-selection');
+  assert.deepEqual([marker.get('4'),marker.get('1'),marker.get('2'),marker.get('3')],[16,-.5,.5,1]);
+  assert.deepEqual(selectedStyle(output.data),selectedStyle(source));
   const restored=await executeJob({operation:'native-portrait',data:output.data,opts:{template,sharpBackgroundEvidence}});
   assert.equal(restored.report.mode,'restored-native-portrait');
   assert.deepEqual(selectedStyle(restored.data),selectedStyle(output.data));
@@ -643,7 +651,7 @@ test('measured sharp native background restores aperture without altering recons
 test('native Portrait reconstruction does not reset complete native Styles or an unrelated photo',async()=>{
   const profile=buildGeneratedProfile('48-12',assets);
   for(const source of [incompleteBrightIso(),capture(attachAiDepth(incompleteBrightIso({complete:true}),depth),12,0)]){
-    const out=await executeJob({operation:'patch',data:source,profile,opts:{portraitStyleRebuild:true,experimental:true}});
+    const out=await executeJob({operation:'patch',data:source,profile,opts:{portraitStyleRebuild:true,experimental:true,linearThumb:testLinearThumb}});
     assert.equal(out.report.styleSelectionCompatibility,undefined);
     assert.deepEqual(selectedStyle(out.data),selectedStyle(source));
   }
@@ -654,7 +662,7 @@ test('Bright compatibility is never implicit or applied to complete native Style
   for(const settings of [{},{model:'iPhone 13 Pro'},{model:'iPhone 17 Pro'},{preset:1},{complete:true}]){
     const source=incompleteBrightIso(settings);
     const output=await executeJob({operation:'patch',data:source,profile,
-      opts:{reconstructedBright:Object.keys(settings).length>0,experimental:true}});
+      opts:{reconstructedBright:Object.keys(settings).length>0,experimental:true,linearThumb:testLinearThumb}});
     assert.equal(output.report.styleSelectionCompatibility,undefined);
     assert.deepEqual(selectedStyle(output.data),selectedStyle(source));
   }

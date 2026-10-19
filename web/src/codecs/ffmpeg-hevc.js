@@ -108,13 +108,18 @@ export function encodeRgbThumbnail(rgb, width, height, onProgress) {
     onProgress?.({stage: 'encode'});
     const input = rgb.slice();
     const args = ['-hide_banner', '-threads', '1', '-filter_threads', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${width}x${height}`,
-      '-r', '1', '-i', 'input.raw', '-frames:v', '1', '-an', '-c:v', 'libx265',
+      '-r', '1', '-i', 'input.raw', '-frames:v', '1', '-an',
+      '-vf', 'scale=in_range=full:out_range=full,format=yuv420p10le', '-c:v', 'libx265',
       '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p10le', '-profile:v', 'main10', '-tag:v', 'hvc1',
-      '-x265-params', 'info=0:pools=none:frame-threads=1', '-movflags', '+faststart', 'output.mp4'];
+      '-color_range', 'pc', '-color_primaries', 'unspecified', '-color_trc', 'unspecified', '-colorspace', 'unspecified',
+      '-x265-params', 'info=0:pools=none:frame-threads=1:range=full:colorprim=2:transfer=2:colormatrix=2',
+      '-movflags', '+faststart', 'output.mp4'];
     const output = await request({operation: 'encode', pixels: input, args}, [input.buffer]);
     const result = extractEncodedHevc(output);
-    if (result.sps.luma !== 10 || result.sps.chromaDepth !== 10 || result.sps.chroma !== 1)
-      throw Error('Thumbnail encoder did not produce Main10 4:2:0');
+    if (result.sps.luma !== 10 || result.sps.chromaDepth !== 10 || result.sps.chroma !== 1
+        || result.sps.fullRange !== true || result.sps.primaries !== 2
+        || result.sps.transfer !== 2 || result.sps.matrix !== 2)
+      throw Error('Thumbnail encoder did not produce native full-range Main10 4:2:0');
     return result;
   });
   serial = task;

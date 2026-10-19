@@ -4033,3 +4033,1369 @@ by the user; this release does not claim those audit findings have been fixed.
 Validation: 378 automated checks pass, 15 skip, 0 fail; 59 browser scenarios at
 3× and PWA/i18n checks pass. Slow update feedback, failure recovery and successful
 reload are exercised in the browser with external requests blocked.
+
+## 10.92 — Edited native Styles and additive HDR registration regression (2026-10-18)
+
+The supplied `comparision/HDR-native.HEIC` and `HDR-stylio.HEIC` are a matched
+source/output pair. All original item payloads, properties, MakerNotes and
+references are exact; Stylio adds 25 Texture/matte/XMP items and 8,957 bytes.
+No HDR samples or native Styles calibration are replaced in this pair.
+
+`native-1.HEIC` and `native-2.HEIC` were changed from the camera's original
+Bright preset to Standard before export. Their original-Bright Stylio outputs
+must not be used as a preservation comparison against these edited copies.
+The user confirms both edited Native files still have Styles when reimported
+directly into Photos. Both lack the standalone Styles URI, linear thumbnail
+and delta map, but retain a six-key native 0x54 selection (`5=0`) and ISO tmap.
+Missing standalone resources alone therefore do not establish Photos capability.
+
+The reported `IMG_1730.HEIC` and `IMG_1731.HEIC` differ from these edited inputs
+by exactly 67 bytes: HDR `auxC` and `auxl` registration. All original payloads
+and MakerNotes remain exact. Replaying the old repair worker and full workflow
+reproduced both outputs byte-for-byte, with no error status. The user observes
+Filters on these outputs and Styles on their original inputs. This isolates
+the regression to that registration combination, not pixel or preset loss.
+Separate effects of auxC versus auxl and Photos' internal routing are unknown.
+
+The worker now retains incomplete native Styles HDR declarations. Recognized
+iPhone 16/17 six-key exports without depth can take a Texture-only candidate
+route, preserving the selected preset and every original item/property/outgoing
+reference. The guard accepts supported preset IDs rather than special-casing
+Bright or Standard. Other incomplete/opaque native files stay byte-exact;
+complete native Styles and existing Portrait routes keep their established paths.
+Reupload does not add duplicates or register another HDR role. Automatic Soft
+Skin/reconstruction is skipped for this candidate to avoid replacing native data.
+
+Portable regressions use synthetic samples and sanitized EXIF, covering four
+presets through the actual download workflow and candidate detection for all
+16 supported IDs. Optional tests exercise both reported sources and confirm
+the matched complete HDR pair still produces the prior known output. Targeted
+validation: 86 pass, 10 optional-fixture skips; PWA/i18n checks pass. Shell v223.
+Phone-test Texture-only candidates are generated separately; functioning Photos
+Styles, Texture/Grain and saved renders remain pending device feedback. This is
+not a claim that a reconstructed native renderer has been proven correct.
+
+## 10.93 — Texture-only candidate rejected on iPhone (2026-10-18)
+
+The user downloaded the native-1/native-2 Texture-only candidates and reports
+that Styles is still absent. Keeping HDR declarations exact therefore removes
+one known regression but does not establish the requested Styles+Texture flow.
+The candidate is removed from automatic processing; incomplete native exports
+now return byte-exact. The worker's guard against additional native HDR auxC/auxl
+registration remains. Shell v224. Tests now require exact default preservation
+rather than interpreting the presence of Texture metadata as feature success.
+
+`tools/native-style-rebuild-variants.mjs` creates three isolated experiments:
+A retains no Styles graph and upgrades the preset marker alongside Texture;
+B adds the existing reconstruction pipeline's Styles graph and a target-derived
+Main10 thumbnail while retaining the original six-key selection; C changes only
+B's selection to the eight-key form, retaining preset ID/Tone/Colour/Palette.
+Original primary/HDR samples, HDR declarations and capture metadata are checked
+for preservation. The estimated calibration may change Photos Edit rendering.
+These files are delivered through a temporary LAN-only download page; no private
+photo is placed in web/ or published. Later device results are recorded below.
+
+## 10.94 — Reconstructed Styles recover HDR, but extreme colour differs (2026-10-18)
+
+The user confirms B/C expose Styles and Texture, with stable initial colour and
+no darkening, but no displayed HDR. D registers B's existing HDR gain map with
+auxC/auxl only: HDR is weaker, disappears in Edit and returns after Save. E adds
+the source ISO tmap headroom to B; F does the same for C. E/F retain HDR in Edit
+and after saving. Primary/HDR samples and all source HDR parameters remain exact;
+the headroom sidecar is derived from each photo, not a hardcoded intensity.
+
+The initial E/F report is insufficient for acceptance. The user subsequently
+provided `iCloud Photos (2)/iCloud Photos/IMG_1735.HEIC` (native) and IMG_1751.HEIC
+(edited F). Both have capture time 2026:10:18 19:10:14, 5712x4284, Standard (ID 1),
+Tone -1, Colour +1, Palette 1. The user confirms the same settings. Their saved
+primary pixels differ visibly: F is warmer/pinker and has a different tonal
+response. These rendered copies no longer contain standalone Styles resources;
+their absence must not be interpreted as evidence of the editor UI they exposed.
+
+The current research graph uses profile schema 14, target-estimated statistics
+and light maps, a generated RGB thumbnail and neutral delta samples. The original
+capture's resources retained in stylio-1 use schema 131088 (0x20010), different
+coefficient/curve data, capture gain/range and native spatial resources. The
+schema difference is an observation, not proof of which field causes the colour
+error. Source pixel preservation before editing does not prove native rendering
+after a new Style adjustment. E/F remain excluded from automatic processing;
+the default incomplete native route continues to return the source byte-exact.
+
+`tools/native-style-calibration-variants.mjs` requires matching capture UUID,
+timestamp/subsecond, camera, exposure, aperture and geometry. It builds G from E
+with the same capture's native Styles metadata, H with that plus native linear
+thumbnail, I with those plus native delta samples. No cross-schema coefficient
+splice is used. Source primary/HDR/EXIF/Texture payloads, their properties and
+all graph relationships remain exact. These isolate missing native resources;
+they are not a production repair for arbitrary edited-only uploads. Phone colour
+results remain pending. Portable tests cover structural/HDR preservation without
+claiming that they can simulate the private Photos renderer.
+
+## 10.95 — Same-capture native thumbnail removes most reconstructed colour error (2026-10-18)
+
+Device feedback on G/H/I: G has incorrect colour; H and I look the same and are
+close to native, with only a very slight remaining brightness/colour difference.
+The supplied `iCloud Photos (3)/iCloud Photos/IMG_1729.HEIC` is the native reference;
+IMG_1755.HEIC is edited I. The user confirms both use the Standard control's lower
+right extreme. Their markers agree on Standard ID 1, Tone -1 and Colour +1.
+Standard has no Palette control in Photos. The previous test-page instruction to
+set Palette 100 was wrong for Standard; marker key 3 still records 1 internally,
+which is not evidence of a visible Palette slider.
+
+Both rendered files have the same Display-P3 ICC property. Area-sampled 1024x768
+SDR RGB8 comparisons against IMG_1729 give mean absolute code differences 20.6513
+for edited F (IMG_1751) and 2.5795 for edited I. Cabinet-region differences decrease
+from 34.6671 to 1.1553. I's ceiling difference is 3.3712 and shadow difference 5.6663;
+shadows have higher G/B values, consistent with a slightly cooler/lifted response.
+These are decoded SDR code differences, not calibrated perceptual errors or HDR
+quality percentages. The original-native reference matches the earlier capture
+and controls. Source files and scripts stay in private/ignored artifact folders.
+
+Native IMG_1729 retains ISO headroom 5.2651838132. Edited I uses an Apple auxiliary
+gain-map sidecar declaring version 131072 and headroom 5.2651839256. The latter
+matches to float precision. Their HDR container representations differ, and the
+remaining SDR pixels already differ before any HDR screen presentation. Neither
+matching headroom nor preserved gain-map bytes proves full rendering parity.
+
+The native thumbnail is 10-bit full-range HEVC; the generated E thumbnail is
+10-bit limited-range HEVC. Both decoded samples also differ visibly in tonal
+response. Those observations do not isolate a range-tag bug: the encoded sample
+values differ too, and merely relabelling a stream would not recover a missing
+native linear reference. G-to-H changes only the thumbnail sample/properties,
+after installing same-capture native Styles metadata, and removes most of the
+observed colour error. H-to-I adds native delta samples with no reported visible
+benefit. Native metadata's independent contribution is still unisolated.
+
+The uploaded edited-only native-1/native-2 files contain neither that native
+thumbnail nor native Styles calibration. H/I rely on the same capture's original
+resources retained in stylio-1; this is not a general single-file repair. No
+global exposure/colour adjustment is adopted from one reference. Default exact
+preservation and the guard against graphless HDR registration remain in place;
+the full requested editable Styles + Texture flow is still incomplete.
+
+## 10.96 — Original Bright baseline and next colour isolation (2026-10-18)
+
+The newly supplied `Downloads/IMG_1729.HEIC` is the unedited Bright capture,
+distinct from the adjusted same-named file under iCloud Photos (3). It is
+2,316,672 bytes, 5712x4284, capture 19:10:14.827, schema 0x20010 and an eight-key
+Bright selection (Tone -0.5, Colour +0.5). It retains native Styles, thumbnail and
+delta resources. Every original item payload matches the corresponding item in
+comparision/stylio-1.HEIC. The actual file-processing harness produces stylio-1
+byte-for-byte from this new input (+8,957 bytes of Texture resources), and a new
+optional regression verifies all original payloads, properties and references.
+All nine targeted native-export tests pass. This establishes a clean original
+plus Texture control, not Photos render equality after further adjustments.
+
+A numerical reconstruction probe compared primary RGB to the capture's own
+native thumbnail for the indoor, night and HDR-native scenes, with 16-bit
+decoding and stored-orientation alignment. Identity/gamma/linear/log variants
+with fitted gain and offset reduce thumbnail sample differences but need
+different parameters by scene; fitting requires the reference thumbnail that
+an edited-only upload lacks. These are diagnostics, not calibrated production
+parameters, and no fixed exposure/colour override is enabled. The portrait HDR
+reference requires undoing FFmpeg's internal HEIF grid rotation even with
+-noautorotate; misaligned results are discarded.
+
+CMRA's Texture plist declares HardwareModel iPhone19,2 and people-data version 3,
+the same values as Stylio. The sample grain seeds differ. This comparison does
+not isolate whether activation of the Texture renderer causes the small remaining
+native-vs-I difference. A requested device control uses the unchanged stylio-1
+Bright+Texture output, sets Standard/Tone -1/Colour +1 in Photos, and compares it
+with the adjusted Native reference. Its result will distinguish a Texture-only
+render difference from one introduced by reconstructing the edited export.
+Device results remain pending; current incomplete-input preservation stays exact.
+
+## 10.97 — Native Bright plus Texture matches the native editing control (2026-10-18)
+
+The user tested stylio-1 (the unedited original Bright plus additive Texture),
+selected Standard with Tone -1/Colour +1, and reports a 100% match to the native
+reference. On this capture and these settings, adding Texture with all native
+editing resources retained does not produce the small difference seen in I.
+The remaining defect is therefore in the reconstructed edited-export route;
+this does not establish a universal Texture rendering result for all photos.
+
+The next bounded same-capture diagnostic set is generated by
+`tools/native-style-base-variants.mjs`:
+
+- J retains I's payloads/graph and changes only 0x54 to the original capture's
+  eight-key encoding, preserving the edited preset/Tone/Colour/Palette values.
+- K adds only original MakerNote tag 0x5e to J. The tag is opaque (four bytes);
+  no interpretation of it as a rendering flag or claim that it causes the defect
+  is made. All other capture metadata stays on the edited input.
+- L starts with the original Bright + Texture graph and base, and writes the
+  edited selection in the eight-key form. This tests keeping the native image
+  base separately from the initial selection; its initial display may remain
+  captured Bright. It is a diagnostic, not a complete selected-Style export.
+
+The generator verifies unchanged preset parameters, all base payloads except
+Exif, all properties/references, semantic Exif fields and unrelated MakerNotes.
+The read worker classifies J/K/L as known-compatible. No unknown-source mutation,
+new colour compensation or automatic reconstruction is enabled. Device rendering
+results for these new probes are pending.
+
+## 10.98 — L's full preview retains Bright; separate display-resource probe (2026-10-18)
+
+The user finds L the closest colour result, but its full-size Photos view before
+Edit is warm/red like captured Bright; entering Edit makes it normal. The user
+explicitly distinguishes the full-size view from the library thumbnail. L kept
+the original rendered Bright primary and ordinary thumbnail while changing only
+selection metadata. This confirms a visible-render/selection mismatch in that
+experiment, not merely a stale small thumbnail. Exact equality of L's adjusted
+render with native is not yet asserted.
+
+`tools/native-style-preview-variants.mjs` creates M/N from L and edited native-1:
+both copy the edited Standard primary samples with their own matching decoder
+properties, and regenerate the ordinary 416x312 display thumbnail. The native
+Styles blob, linear thumbnail, delta map, HDR samples/metadata, Texture and all
+graph relationships remain byte-exact relative to L. M keeps L's eight-key
+selection; N uses the edited source's six-key marker. Selected parameters agree.
+All other semantic Exif fields/MakerNotes are preserved. The normal thumbnail's
+encoder VUI is explicitly checked against its encoded P3/sRGB/full-range matrix.
+
+The actual read worker classifies both as known-compatible. FFmpeg's decoded
+73,410,624-byte SDR RGB view of M is byte-identical to native-1. This establishes
+the written Standard display, not the Photos editor response. Original Bright
+HDR is retained while the SDR display changes, so HDR/colour coherence still
+needs device validation; preserving those bytes alone is not acceptance. M/N
+remain private diagnostics using same-capture original resources. The main app
+does not select them automatically.
+
+## 10.99 — M/N edit colours hold; isolate the remaining full-preview defect (2026-10-18)
+
+The user reports M and N look identical: the full-size view before Edit still
+has a warm/red cast, reduced relative to L. Entering Edit restores the expected
+colour, and Standard Tone -1/Colour +1 still looks correct as in L. The marker
+encoding alone therefore did not remove this defect. Byte-identical decoded SDR
+does not establish Photos presentation equality. The retained Bright HDR and
+the container layout remain separate hypotheses, not confirmed causes.
+
+`tools/native-style-preview-hdr-variants.mjs` generates three same-capture probes:
+
+- O repacks M into one mdat, preserving every declared payload, property and
+  reference, and removes unused historical picture bytes from appended mdats.
+- P removes HDR gain-map resources, tone-map metadata, HDR sidecars and the
+  alternate-rendition group from O. It is deliberately SDR-only, a diagnostic
+  control rather than an acceptable final export.
+- Q retains O's native editing resources and Standard display, replaces HDR
+  tiles and their decoder properties with the edited Standard source's exact
+  data, and uses that source's ISO tone-map equation plus its own headroom XMP.
+
+All three pass real read-worker discovery and classify as known-compatible.
+The generator asserts valid property indices, no dangling references, exact
+Standard primary samples and unchanged native Styles/linear-thumbnail/delta
+payloads. O's entire declared graph is preserved; Q's non-HDR resources and
+references remain exact. These are structural checks, not device render tests.
+Device results for O/P/Q remain pending. No automatic reconstruction or colour
+compensation has been enabled in the main app.
+
+## 10.100 — O/P/Q do not remove the preview cast (2026-10-18)
+
+The user reports all three still show a cast before Edit and return to correct
+Standard colour upon entering Edit; HDR is reported normal for the HDR test.
+O's canonical repack does not resolve the symptom. P contains no HDR resources,
+so the continued cast cannot be explained solely by mismatched HDR gain data.
+Q's matching Standard HDR likewise does not resolve it. Primary ICC profile
+bytes are identical between native-1, the original Bright and P; the Standard
+tile decoder properties in P already match native-1 exactly. A generic ICC
+profile mismatch is therefore unsupported. These results do not identify the
+Photos viewing path or rule out effects from retained native editing resources.
+
+Two further single-variable metadata controls use Q as the common baseline:
+`tools/native-style-preview-metadata-variants.mjs` writes R without opaque
+MakerNote 0x5e, which is present in the original Bright but absent in the edited
+native export. Its four-byte content is not interpreted as a rendering flag.
+S instead keeps 0x5e and changes only the UUID-shaped MakerNote 0x2b value to test
+identifier reuse independently. This is a private diagnostic, not a production
+policy to discard capture metadata or replace identifiers.
+
+Both pass actual read-worker discovery/classification as known-compatible.
+Assertions verify exact non-Exif payloads, all properties/graph references,
+semantic Exif and every unrelated MakerNote. Both retain Q's exact HDR, primary,
+native Styles/linear-thumbnail/delta and Texture resources. Device results are
+pending. A separate requested control has the user change Tone one step in Q,
+save, and inspect whether Photos' regenerated view retains the cast. No new
+automatic production mutation has been introduced.
+
+## 10.101 — Saving a real edit refreshes Q's view; R/S remain red (2026-10-18)
+
+The user confirms Q stops showing the cast outside Edit after changing a
+parameter slightly and saving. They also point to prior recorded viewing/editing
+discrepancies in this document. Related histories include the unresolved Edit
+colour transition in section 10 and the separate native Film preview/final bug
+in 10.63; those are not evidence that this case has the same underlying cause.
+The current save-and-regenerate workaround is now device-confirmed. It is not
+an automatic file-export fix and does not prove a Windows/web implementation can
+reproduce Photos' render. Avoid repeating a test solely to reconfirm this fact.
+
+R and S both retain the warm/red cast before Edit and correct Standard colour
+inside Edit. Neither removing opaque 0x5e nor replacing UUID-shaped 0x2b solves
+the symptom on this capture. They remain rejected diagnostic mutations; neither
+is adopted as a capture-metadata policy.
+
+`tools/native-style-preview-render-variants.mjs` makes two Q-based controls:
+T replaces only native delta-map samples and their decoder configuration with
+the existing constant neutral profile asset, checking tile geometry and leaving
+the native Styles/linear thumbnail untouched. U changes only primary SPS colour
+primaries/transfer from unspecified 2/2 to explicit P3/sRGB 12/13, consistent with
+the existing ICC's primaries/transfer. Matrix 6, full range, all other SPS fields,
+all primary picture samples and every unrelated property remain exact. Every
+primary tile is checked for absence of an overriding in-band SPS. This tests a
+declaration/fallback interaction, not arbitrary exposure or colour compensation.
+
+Both retain exact Q HDR, Exif, native Styles metadata, linear thumbnail and
+Texture; graph references are unchanged. Real read-worker classification is
+known-compatible. All declared preservation assertions pass. These tests cannot
+verify Photos' two rendering contexts; T/U device feedback is pending. Main-app
+incomplete-input exact preservation and cache v224 are unchanged.
+
+## 10.102 — T/U fail; compare Photos' saved current version next (2026-10-19)
+
+The user reports both T and U retain the warm/red full-size view before Edit.
+Entering Edit was already correct on their common Q baseline. Therefore neither
+neutralizing the native StyleDelta samples nor making the primary HEVC SPS
+primaries/transfer explicit resolves this symptom. These diagnostic mutations
+are rejected and remain outside the application path.
+
+The tight remaining device loop is the same Q asset before and after a tiny
+Photos adjustment: imported Q is red in the viewer, while changing one parameter
+slightly and tapping Done makes the viewer correct. Apple documents that Photos
+stores previous and current image versions together with separate adjustment
+data for non-destructive edits. This supports, but does not by itself prove, the
+current leading explanation: tapping Done creates a Photo Library current
+rendition/adjustment state that a standalone imported HEIC does not supply.
+The web application cannot create a PhotoKit content-editing output or attach
+Photo Library adjustment data through a file download.
+
+Do not infer the exact changed fields from the on-device appearance. The next
+required artifact is the **Current** export of the corrected Q asset after the
+tiny adjustment, not its unmodified original. Compare it against the original Q
+with `tools/compare-photo-contracts.mjs`, then inspect item payloads, properties,
+references, Exif/MakerNotes and any sidecars. If the current export is flattened
+and lacks Styles resources, that is evidence that the correct viewer state lives
+in the Photos asset's adjustment/current-version pair rather than in a reusable
+standalone editable HEIC. It would also confirm the existing supported workflow:
+add Texture to the unmodified resource, import it, then apply/save the Style in
+Photos. No further colour compensation or metadata guessing should precede this
+comparison.
+
+## 10.103 — Photos Current export confirms a library-level adjustment state (2026-10-19)
+
+The user changes Texture slightly in Q, taps Done and reports that the full-size
+viewer returns to the correct Style colour. The resulting Photos **Current** export,
+`IMG_1768.HEIC`, is 2,075,077 bytes versus Q's 2,398,867 bytes. The contract
+comparison finds 80 items instead of 159. It removes the Styles plist, Texture
+record, linear thumbnail, StyleDelta graph, twelve Texture mattes and all of their
+editing relationships. Primary and HDR grid descriptors remain byte-identical,
+while primary and HDR tile payloads are newly rendered. HDR remains represented.
+
+The MakerNote selection changes from Q's 127-byte eight-key form to the 98-byte
+six-key edited-export form: keys 0–4 retain Standard and its Tone/Colour values,
+key 5 becomes zero, and keys 6/7 are absent. This marker difference is descriptive,
+not a reusable adjustment sidecar; M/N already established that switching marker
+shape does not repair the imported viewer state.
+
+Therefore `IMG_1768.HEIC` is a flattened current rendition with no explicit
+Styles/Texture graph. This does not by itself prove that a fresh import lacks the
+controls: the earlier six-key native exports also omit that graph but expose Styles
+on the tested device. Fresh-import behavior for `IMG_1768` has not been reported.
+The result is consistent with Photos retaining Q as the original resource together
+with a separately generated current rendition and adjustment state. A standalone
+browser download cannot attach that PhotoKit state. Grafting the flattened pixels
+back into Q would mix an already-rendered Style/Texture image with the original
+editing graph and risks applying the edit twice; it is not an evidence-based
+production repair.
+
+The safe product behavior remains exact preservation for edited native exports
+that lack their original Styles graph. The UI now gives the usable order: process
+the unmodified HEIC in Stylio first, import it into Photos, then choose the desired
+Style and tap Done. Shell cache v225 carries this guidance. No colour compensation,
+opaque metadata guess or flattened-pixel graft is enabled.
+
+## 10.104 — Native Standard display still shifts in Edit (2026-10-19)
+
+The user clarifies that both the native reference and the test asset were captured
+with Bright and then changed to Standard. X uses the exact native Standard primary,
+HDR tiles and tmap, so its full-size preview matches the native Standard reference.
+When Photos enters Edit, however, X becomes slightly blue relative to that same
+native Standard reference even when Standard and all visible controls match.
+The user's Current export of X after this Edit path, `IMG_1784.HEIC`, is byte-for-byte
+identical to the earlier corrected-Q Current export `IMG_1768.HEIC`. This confirms
+that Photos is producing the same editor rendition from both reconstructed files;
+the mismatch is in the editor base/calibration path rather than the displayed
+Standard primary.
+
+Y regenerates the linear thumbnail from the exact native Standard rendition. Z
+does the same and replaces StyleDelta samples with the constant neutral profile.
+The user reports that both retain X's behavior: preview is correct, but entering
+Edit gives the same slight blue shift. Therefore neither the linear-thumbnail
+pixels nor native-versus-neutral StyleDelta samples isolate the remaining error.
+They remain rejected diagnostics and are not enabled in production.
+
+## 10.105 — Separate preferred Standard rendition from Bright editor base (2026-10-19)
+
+`tools/native-style-dual-rendition-variants.mjs` tests a two-base HEIC structure.
+It starts from L, whose exact original Bright primary and native Styles calibration
+give the correct editor response. It then copies the exact native Standard primary,
+HDR grid and tile samples into hidden items and makes the existing preferred ISO
+`tmap` derive from those Standard items. The HEIF `pitm` remains the original Bright
+grid for the Styles editor, while the `altr` group continues to prefer the tmap for
+normal HDR viewing. The ordinary thumbnail is also copied from native Standard.
+
+AA leaves native editing resources associated with both the Bright primary and the
+preferred tmap, matching Apple's original target topology. AB removes the tmap from
+the shared `auxl`/`cdsc` editing targets, leaving the exact Bright primary as their
+only editor target. Both retain native Styles metadata, linear thumbnail, StyleDelta,
+Texture, HDR, selection marker and capture identity. The worker classifies both as
+known-compatible, and every Standard display plus Bright editor payload is asserted
+byte-exact against its same-capture source. Device results are pending. These files
+require the same-capture original and remain diagnostics rather than a single-file
+repair for an edited-only upload.
+
+## 10.106 — AA/AB improve but do not eliminate the Edit difference (2026-10-19)
+
+The user reports the dual-rendition AA/AB result is provisionally better but still
+differs from the native Standard reference. This means retaining the exact Bright
+`pitm` as the editor base while making Standard the preferred alternate is not a
+complete solution. No empirical colour offset is derived from the residual.
+
+`tools/native-style-hidden-editor-variants.mjs` reverses the ownership for the next
+bounded test. AC/AD keep X's exact native Standard primary, HDR and tmap unchanged
+for display, add the exact same-capture Bright primary and all 45 tiles as a hidden
+grid, and route the Styles/Texture `auxl`/`cdsc` graph to that hidden Bright base.
+AC removes the displayed Standard pair from those editing targets. AD lists hidden
+Bright first and retains Standard primary/tmap as secondary targets for discovery.
+Both retain the native calibration resources and pass real-worker parsing as
+known-compatible. Device results are pending; the added hidden base requires the
+same-capture original and is not a generic edited-export repair.
+
+## 10.107 — AC proves the hidden Bright base fixes colour; discovery targets restore the shift (2026-10-19)
+
+Device feedback separates AC from AD. AC does not shift when entering Edit, which
+confirms the exact hidden Bright grid is a correct editor base for this capture,
+but Photos exposes neither Styles nor Texture. AD exposes both controls, but its
+Edit colour shifts again. Their only intended graph difference is that AD also
+targets the displayed Standard primary/tmap from every shared editing resource.
+Thus the remaining problem is the minimum discovery relationship Photos requires,
+not the Bright calibration or Standard preview pixels.
+
+The generator now adds four target subsets while keeping Standard display bytes
+and the hidden Bright grid identical. AE links only the Styles and Texture metadata
+descriptors to Standard primary. AF links those descriptors to Standard primary
+and tmap. AG links the descriptors plus linear thumbnail and StyleDelta to Standard
+primary. AH links that core set to Standard primary and tmap. All other Texture
+mattes and editing auxiliaries remain Bright-only. Each output is worker-readable
+and known-compatible. Device results will identify whether a metadata-only link
+can expose both controls without making Standard the editor base.
+
+## 10.108 — AE-AH behave like AC; test Exif and primary-only graph (2026-10-19)
+
+The user reports AE, AF, AG and AH all behave exactly like AC: entering Edit does
+not produce the colour shift, but Styles and Texture are unavailable. Therefore
+linking the two metadata descriptors, linear thumbnail and StyleDelta to Standard
+primary and/or tmap is insufficient for Photos control discovery. All four kept
+Exif associated only with the hidden Bright grid.
+
+AI-AL test the remaining discovery boundary. AI links only Exif to Standard primary.
+AJ links Exif plus Styles/Texture descriptors. AK links Exif, descriptors, linear
+thumbnail and StyleDelta. AL links every formerly shared editing resource to the
+Standard primary but deliberately excludes the Standard tmap. Every variant keeps
+the hidden Bright target first. This distinguishes Exif's Style marker relation and
+primary association from the alternate-rendition association that may be responsible
+for AD's colour shift. Device results are pending.
+
+## 10.109 — Exif changes the fallback mode; complete primary graph restores controls and shift (2026-10-19)
+
+The user reports AI behaves like AC. AJ and AK still expose no Styles/Texture,
+but traditional Filter is also absent. This is consistent with Photos recognizing
+a native Styles editing mode after Exif plus metadata/core links while rejecting
+the still-incomplete graph; it does not prove a specific undocumented validation
+rule. AL exposes Styles and Texture and shifts colour like AD. Since AL targets
+only Standard primary, the tmap target is not required for the shift.
+
+The difference from AK to AL is now limited to the semantic sky matte and twelve
+iOS 2026 Texture mattes. AM adds only sky to AK. AN and AO add the first and second
+halves of the Texture matte set. AP adds all twelve Texture mattes while leaving
+sky Bright-only. These variants retain exact Standard display and hidden Bright
+payloads. Device results will show whether full Texture matte association is the
+graph-completeness gate and whether sky participates.
+
+## 10.110 — All Texture matte targets complete the graph, but bind editing to Standard (2026-10-19)
+
+The user reports AM, AN and AO behave like AJ/AK: traditional Filter is hidden,
+but Styles/Texture controls are absent. AP behaves like AD: both controls return
+and Edit shifts colour. Sky and either half of the Texture matte set are therefore
+insufficient; all twelve Texture matte associations form the observed completeness
+boundary. Their full primary association also coincides with Photos selecting the
+displayed Standard primary as the editing base. Removing any subset is not a fix
+because it leaves the graph unusable.
+
+`tools/native-style-split-tmap-variants.mjs` now avoids that invalid split. It starts
+from L and preserves byte-exact original Bright primary, Bright HDR, Bright tmap and
+every native Styles/Texture association. It adds a separate exact Standard primary,
+HDR and tmap from the same-capture native current rendition, then places the Standard
+tmap first in the `altr` viewing group. Unlike AA/AB, the native Bright tmap is not
+replaced. AQ groups Standard tmap with Bright primary; AR also lists Standard grid;
+AS also lists the preserved Bright tmap. The worker accepts all three as known-
+compatible. Device validation must establish whether Photos uses Standard for normal
+viewing while keeping the untouched Bright rendition for the editor.
+
+## 10.111 — Separate Bright and Standard alternate groups (2026-10-19)
+
+The user reports AQ and AR are identical and are the closest result so far, with
+only a very small remaining colour difference in Edit. AS is worse. Adding the
+Standard grid to AQ's single alternate group has no effect, while adding the Bright
+tmap to that same group changes the result adversely. The remaining error is thus
+associated with sharing one alternate group, not missing Standard grid membership.
+
+AT-AW preserve all Bright and Standard payloads from AQ/AR and vary only alternate
+group ownership. AT places a separate Standard group first and Bright group second
+while keeping Bright as `pitm`; AU reverses the group order. AV puts all four
+renditions in one group and makes Standard the primary. AW uses two groups and makes
+Standard the primary. These variants test whether Photos can use an independent
+Standard current rendition while resolving the complete Styles/Texture graph from
+the Bright group. Device results are pending.
+
+## 10.112 — AW matches colour but loses controls; isolate selection state (2026-10-19)
+
+The user reports AT, AU and AV behave like AQ/AR. AW gives the most accurate colour
+but loses Styles/Texture controls. AW's independent Standard primary group therefore
+works as a baked current rendition, while Photos no longer resolves the Bright graph
+as the editor for that primary. Combining the groups restores controls and the small
+remaining recomputation difference. Group order alone does not change it.
+
+The remaining byte-level difference relevant to editor initialization is MakerNote
+tag 0x54. Original Bright stores an eight-key selection with preset 16, Tone -0.5,
+Colour +0.5 and capture flag 1. AQ stores Standard preset 1, zero Tone/Colour and the
+same capture flag. The Photos-saved Standard current rendition stores a six-key form
+with flag 0. `tools/native-style-selection-marker-variants.mjs` keeps AQ's image,
+HDR, Styles, Texture and graph bytes exact while producing AX with the original Bright
+marker, AY with Photos' six-key Standard marker, and AZ with the eight-key Standard
+marker but edit flag 0. Device results will determine whether the last residual comes
+from original/current selection state rather than calibration.
+
+## 10.113 — Marker form does not remove residual; saved current is slightly darker HDR (2026-10-19)
+
+AX enters Edit as original Bright, as its marker requests, and no longer represents
+the desired initially selected Standard state. AY and AZ behave identically: Standard
+remains selected and Edit retains AQ/AR's small colour difference. Therefore the
+six-versus-eight-key marker form and key 5 edit flag do not remove the residual.
+
+The user reports that changing one control slightly and saving produces the closest
+Standard colour, but the regenerated HDR appears slightly darker, estimated below
+10%. This is consistent with Photos creating a new current rendition rather than a
+standalone marker effect. The estimate is visual device feedback, not a measured HDR
+headroom difference.
+
+BA-BD keep AQ's exact preview/HDR/editor graph and set a tiny +/-0.01 Tone or Colour
+value together with the edited flag. They test whether a non-zero selected parameter
+enters Photos' adjusted-render path without requiring a PhotoKit save. No primary,
+HDR, calibration, Texture or graph payload changes. These values are diagnostics and
+not a production colour offset.
+
+## 10.114 — Tiny marker adjustments fail; split original/current Exif state (2026-10-19)
+
+The user reports BA, BB, BC and BD all retain the same slight colour error when
+entering Edit. Positive or negative 0.01 Tone/Colour therefore does not trigger a
+file-level equivalent of Photos' saved adjusted/current rendition path. Combined
+with AX-AZ, the 0x54 marker branch is exhausted for this residual: selection form,
+edit flag and a tiny non-zero control value do not remove it.
+
+AQ is re-evaluated from its ancestry before the next test. Its Bright editor base is
+not reconstructed calibration: L starts from the exact original Bright capture and
+the normal additive Texture writer, and AQ keeps that Bright primary, HDR/tmap,
+Styles metadata, native linear thumbnail, StyleDelta and Texture graph intact while
+adding the exact same-capture Standard preferred rendition. This focuses the remaining
+hypothesis on ownership/state between original Bright and current Standard rather than
+missing Bright calibration.
+
+`tools/native-style-dual-exif-variants.mjs` creates BE-BH. The existing AQ Exif is
+restored to the exact original Bright Exif, while a second Exif item carries the exact
+Photos-saved Standard current Exif from the same capture. Capture UUID equality is
+required. BE associates Bright and Standard Exif with their respective primary grids;
+BF associates each Exif with its own primary+tmap pair; BG leaves Standard Exif on the
+Standard tmap only; BH uses the full per-rendition associations and also makes the
+Standard grid `pitm`. All image, HDR, Styles calibration and Texture payloads inherited
+from AQ remain exact. These variants test whether a standalone HEIF can approximate
+PhotoKit's original/current split without changing colour coefficients or Style values.
+They remain diagnostics and are not enabled in the application path pending device
+validation.
+
+## 10.115 — Dual-original ownership is rejected; preserve the edited asset as the only editor base (2026-10-19)
+
+Device testing rejects BE-BH for the requested workflow: all four reopen the photo in
+its captured Bright state. Although the files contain a Standard current rendition,
+carrying the original Bright editor graph/Exif ownership makes Photos resolve the
+original capture as the editable Style state. This violates the product contract and
+closes the branch that uses an original-capture rendition as an editor base.
+
+The required contract is explicit: a camera photo may be captured with any default
+Undertone Style; the user may then change the Style and/or its controls in Photos; the
+edited HEIC uploaded to Stylio is the source of truth; Stylio must add Texture while
+preserving that selected Style, its parameters, HDR and edited pixels. The original
+capture may be used only as a research reference, never as output state.
+
+`native-1.HEIC` already satisfies the Style half of that contract when imported directly:
+it was captured Bright, edited to Standard, and Photos still exposes the edited Style
+even though the standalone Styles plist/linear thumbnail/delta graph are absent. The
+next diagnostics therefore start only from this edited export and isolate Texture graph
+ownership. `tools/native-style-edited-texture-target-variants.mjs` keeps the source
+primary, HDR and 0x54 selection marker exact and adds the full Texture metadata plus all
+twelve 2026 mattes. BI targets every new Texture resource only to the edited primary;
+BJ targets them only to the ISO tmap; BK targets Texture metadata only to primary while
+mattes retain primary+tmap; BL keeps Texture metadata on primary+tmap while mattes target
+primary only. No original Bright payload or calibration is included. All four are
+worker-readable and classified known-compatible; device validation determines whether
+implicit edited Styles can coexist with Texture without reconstructing a Styles graph.
+
+## 10.116 — Full Texture graph itself knocks edited exports out of HDR/Styles mode (2026-10-19)
+
+Device testing of BI, BJ, BK and BL reports the same failure in every target-layout
+variant: HDR is no longer displayed and Photos Edit no longer exposes Photographic
+Styles. Because all four retain the edited primary, HDR payloads and the six-key Style
+selection marker byte-exact, and differ only in whether the new Texture metadata/mattes
+target primary, tmap or both, the failure is not caused by primary-vs-tmap ownership.
+The observed mode switch follows the presence of the complete grafted Texture contract
+on an edited export whose original standalone Styles graph is already absent.
+
+The next bounded test decomposes the Texture contract rather than rebuilding Styles.
+BM adds only `texture_styles` metadata to the edited primary, with no 2026 mattes. BN
+adds only the twelve 2026 mattes plus their XMP sidecars, with no `texture_styles`
+metadata. BO adds only the 74-byte native iPhone 18 MakerNote `0x65` Texture capture
+record from a neutral native sample and adds no HEIF Texture items. BP combines that
+`0x65` record with metadata-only BM, still without mattes. All four preserve the edited
+primary, source HDR items and selected 0x54 Style marker. BO/BP intentionally classify
+as `unknown-apple-contract` because `0x65` on iPhone 16 is future-contract evidence;
+they remain diagnostics only.
+
+## 10.117 — `0x65` preserves HDR but still invalidates implicit edited Styles (2026-10-19)
+
+Device results for BM-BP further separate the failure modes. BO, which adds only the
+native iPhone 18 MakerNote `0x65` Texture-generation record, still displays HDR but
+Photos Edit no longer exposes Photographic Styles. BM (`texture_styles` metadata only),
+BN (twelve 2026 mattes/XMP only), and BP (`0x65` + metadata) lose both displayed HDR
+and Styles. None changes the edited primary, source HDR payloads or the selected 0x54
+Style marker.
+
+This means `texture_styles` and/or the 2026 matte graph can independently force the
+edited iPhone 16 export out of its native HDR route, while `0x65` alone does not. The
+Styles loss is broader: even an Exif-only `0x65` change is enough to make Photos stop
+honouring the edited export's implicit Styles capability. Before attributing that solely
+to `0x65` semantics, the next diagnostic must determine whether any harmless container
+or Exif relocation invalidates the same implicit Styles state. BQ-BT therefore compare
+an exact source copy, an appended inert top-level `free` box, an inert metadata item that
+only grows `meta` and shifts extents, and a byte-identical Exif payload relocated through
+the same rebuild path. These tests contain no Texture semantics.
+
+## 10.118 — Exact-byte control also loses Styles after web re-import; provenance is now the leading hypothesis (2026-10-19)
+
+Device results for BQ-BT are decisive. BQ is a byte-for-byte copy of `native-1.HEIC`, yet
+after the current web download/import flow it still has HDR but no Photographic Styles
+control. BR (only an appended top-level `free` box) and BT (byte-identical Exif payload
+relocated through the rebuild path) behave the same: HDR remains, Styles is absent. BS,
+which grows `meta` and shifts the existing external extents, loses both HDR and Styles.
+
+Therefore the Styles loss observed in BQ/BR/BT cannot be caused by a byte mutation in
+BQ: BQ has none. At least one earlier assumption must be refined. Either the prior
+`native-1` validation did not represent a fresh re-import through the same path, or
+Photos' Styles availability also depends on asset provenance/import context outside the
+HEIC bytes. BS separately confirms that HEIF meta/extent rewrites can invalidate the HDR
+path.
+
+The next control must replay the exact edited source bytes under their original filename
+and camera-style naming through the same HTTP path, and compare forced-download versus
+direct-open/save flows. If every exact-byte delivery still loses Styles, the edited
+export itself is not a portable standalone Styles contract and production cannot satisfy
+“edited Style + Texture” from that flattened HEIC alone without recreating an
+Apple-recognized editor graph from other information.
+
+## 10.119 — Exact-byte transport closes the implicit-Styles branch (2026-10-19)
+
+BU-BX replay the exact `native-1.HEIC` bytes through four import paths: ordinary web
+download with the original filename, direct Safari open/save, the same bytes renamed to
+`IMG_1729.HEIC`, and a ZIP transport extracted in Files before saving to Photos. The
+HEIC payloads are SHA-256 identical where applicable. The user reports the same result
+for every route: HDR remains, but Photographic Styles controls are absent after fresh
+import.
+
+This closes filename, forced-download, direct-open and archive transport as explanations.
+The Photos-edited export is a flattened current rendition, not a portable standalone
+editable-Styles asset. Its six-key 0x54 marker describes the current selection but is
+not sufficient to recreate Photos' library-level adjustment/editor state. A file-only
+Stylio solution therefore has to synthesize an Apple-recognized editing graph around the
+edited rendition. The edited HEIC remains the sole source of truth; the captured Bright
+original must not become the output/editor base.
+
+The most promising missing resource is the native `linearThumb`. Earlier H/I device
+results showed that replacing the reconstructed thumbnail with the same-capture native
+linear thumbnail removed most of the colour error, while replacing StyleDelta samples
+added no visible benefit. New research decodes native linear thumbnails only as ground
+truth and fits them against their own rendered primary. After correcting HEIF `irot`, an
+8-photo iPhone 16 corpus is well approximated by a per-channel affine remap with mean
+MAE about 0.0157. The corpus median is approximately R `0.3648*x+0.2705`, G
+`0.3703*x+0.2775`, B `0.3706*x+0.2689`. The same-capture 1729 research fit is near
+`0.396*x+0.251` on all channels. Native linear thumbnails consistently use 1024x768,
+10-bit 4:2:0 HEVC, full range, with unspecified colour primaries/transfer/matrix. These
+measurements motivate source-only linear-thumbnail synthesis; no native original payload
+is copied into candidate outputs.
+
+## 10.120 — Source-only full-range linear-thumbnail candidates BY/BZ/CA (2026-10-19)
+
+A clean E base was regenerated from the edited export using the existing reconstruction
+pipeline plus the source ISO tmap headroom path that previously kept Styles, Texture and
+HDR active in Edit. `tools/native-style-edited-linear-thumb-variants.mjs` changes only
+that base's reconstructed `linearThumb`. The edited primary, source HDR payloads, selected
+six-key 0x54 marker, Styles graph, Texture graph and E headroom remain exact.
+
+BY uses the 8-photo corpus-median per-channel affine coefficients. BZ uses a deliberately
+neutral scalar `0.37*x+0.27` on all channels. CA uses the same-capture 1729 affine fit as
+a research upper-bound; its coefficients were estimated using original-capture ground
+truth, so CA is not a generic production candidate even though its output thumbnail is
+still generated only from the edited pixels. No original-capture payload is copied by
+any variant.
+
+All generated linear thumbnails are 1024x768 Main10 4:2:0 HEVC, full range, with explicit
+VUI primaries/transfer/matrix code `2/2/2`, matching the observed native transport.
+Worker readback classifies all three `known-compatible`. After HEVC encode/decode, their
+MAE against the same-capture native linear thumbnail is BY 0.01468, BZ 0.01385 and CA
+0.01236. Device testing determines whether this closer source-only linear reference also
+removes the Photos Edit colour shift while retaining Styles + Texture + HDR.
+
+## 10.121 — CA validates edited-only Styles + Texture reconstruction; HDR is the final delta (2026-10-19)
+
+The user tested BY, BZ and CA on-device. All three retain the edited colour accurately,
+restore Photographic Styles controls and keep HDR present. CA is the best visual match and
+is now the accepted research baseline for this capture. The only remaining visible defect
+is that HDR is slightly weaker than the native edited source.
+
+This is the first edited-only reconstruction in this investigation to satisfy the core
+contract simultaneously: the uploaded edited rendition remains the image/editor base,
+the current selected Style survives, Styles + Texture controls are available, and HDR is
+not lost. No original Bright payload is used in the output. Production still remains on
+the fail-safe path until the residual HDR-strength delta is solved and the source-only
+linear-thumbnail method is generalized/validated beyond this capture.
+
+HDR contract audit rules out the XMP headroom scalar as the cause. CA uses
+`HDRGainMapHeadroom=5.265183813`, while the same-capture native full graph records
+`5.265185`. The edited flattened source and CA also retain the exact same ISO `tmap`
+alternate value (`2.396483898`) and headroom ratio (`5.265183813`). The material routing
+difference is that CA adds the legacy Apple gain-map `auxC`, `auxl` and HDR XMP required
+by the reconstructed editor path, while the flattened source displays HDR through its ISO
+`tmap` without those legacy declarations.
+
+A native iPhone 16 corpus shows that full-graph tmap `min` and `gamma` are scene-dependent,
+so hardcoding the original-capture curve is rejected. The next bounded experiment keeps CA
+byte-exact except for HDR routing relationships, isolating whether Photos can retain the
+ISO-tmap intensity while still exposing HDR inside the reconstructed Styles editor.
+
+## 10.122 — CA HDR routing isolation CB-CE (2026-10-19)
+
+`tools/native-style-hdr-routing-variants.mjs` starts from the accepted CA file and changes
+only HDR routing metadata. Every existing item payload remains byte-exact, including the
+edited primary, HDR gain-map image, CA linear thumbnail, Styles plist/StyleDelta resources,
+Texture resources and Exif selected-Style marker. Worker readback classifies every variant
+`known-compatible`.
+
+- CB removes only the HDR gain-map `auxC`, keeping `auxl + HDR XMP`.
+- CC removes only the gain-map `auxl`, keeping `auxC + HDR XMP`.
+- CD keeps only HDR XMP, removing both `auxC` and `auxl`.
+- CE keeps `auxC + auxl` but removes the HDR XMP relation.
+
+CA remains the all-three-declarations control. CB is the leading hypothesis: if Photos can
+use the edited source's ISO tmap intensity while the remaining `auxl + XMP` are sufficient
+for editor persistence, it should restore native-like HDR without disturbing the already
+validated colour/Styles state. No tmap curve or gain-map pixel values are modified.
+
+## 10.123 — CE is the minimum valid HDR routing; residual HDR delta points to Styles calibration (2026-10-19)
+
+Device results for CB-CE close the routing branch. CB (`auxl + XMP`, no `auxC`) renders a
+black image. CC (`auxC + XMP`, no `auxl`) and CD (XMP only) lose HDR. CE (`auxC + auxl`,
+no HDR XMP) keeps HDR and Photographic Styles, but HDR remains slightly weaker than the
+original edited source. Therefore `auxC + auxl` are both required for this reconstructed
+editor graph; HDR XMP is not required for HDR presence and is not the cause of the weak
+HDR rendering.
+
+The user supplied a direct comparison pair: `IMG_1729 (2).HEIC` is the original flattened
+edited source and `IMG_1864.HEIC` is CE. Their ISO tmap payload is identical, including
+alternate headroom `2.396483898162842`, min/max, gamma and offsets. The gain-map item
+payload is also preserved. The remaining HDR-strength difference is therefore downstream
+of the ISO gain-map data itself.
+
+Styles-plist audit exposes a much stronger candidate. CE's generated plist reports
+`LinearImage.whitePoint≈0.166`, `i.OriginalRangeMax≈0.08447`, `i.Gain≈14.57` and `h≈3.64`,
+while the same-capture native full graph reports `LinearImage.whitePoint≈2.55544`,
+`OriginalRangeMax≈1.00781`, `Gain≈10.18` and `h≈2.55`. The current retargeting code still
+uses the old global `LINEAR_IMAGE_SCALE=0.166`, derived from an older eight-image corpus.
+For this high-headroom capture that calibration severely understates the scene-referred
+range even though ToneMappedImage and visible SDR colour are close. The next experiment
+isolates these plist calibration groups without changing any photographic payload.
+
+### Required compatibility invariants added by user
+
+The edited HEIC is always the source of truth not only for the selected Style ID but also
+for Style parameters. A real flattened fixture, `IMG_1735.HEIC`, carries Standard with
+Tone `-1`, Colour `+1`, Palette `1` in its six-key 0x54 marker; future reconstruction must
+preserve that marker byte-exact instead of normalizing to a preset default. The same rule
+applies to any Style ID and non-zero Tone/Colour/Palette values supported by Photos.
+
+Existing Portrait state must also survive reconstruction. If native depth and Portrait
+rendering metadata already exist, Stylio must preserve the native depth resources,
+focus/aperture (f-number) and Portrait Lighting/rendering sidecars rather than replacing
+them with AI depth or a neutral renderer. If the source has no native depth, the existing
+AI Portrait path must remain available after Styles/Texture reconstruction. These are
+release-blocking regression requirements for the eventual edited-export compatibility
+path.
+
+## 10.124 — Styles-plist HDR calibration isolation CF-CM (2026-10-19)
+
+The residual weak-HDR problem is now isolated independently of all photographic payloads.
+`tools/native-style-plist-calibration-variants.mjs` starts from the user's CE file
+`IMG_1864.HEIC` and changes only the Styles plist item. The edited primary, gain-map/tmap,
+CA linear thumbnail, Texture resources, source 0x54 selection and all graph relationships
+remain exact. Same-capture native full-graph `IMG_1729.HEIC` is used only as diagnostic
+calibration ground truth, never as image/editor content.
+
+The phone-test variants are deliberately nested: CK copies only native
+`LinearImage.whitePoint`; CL only `LinearImage.highKey`; CM both fields; CF the complete
+native `LinearImage` block; CG only root `i + h`; CH `LinearImage + i + h`; CI the wider
+native calibration core (`0,4,h,i,j,k` plus LinearImage); CJ the complete native Styles
+plist. All classify `known-compatible`. This matrix can determine whether weak HDR is
+controlled by a single high-range statistic, the range/gain block, or a wider plist
+contract before any source-derived implementation is attempted.
+
+Further source-only analysis confirms that the old `LINEAR_IMAGE_SCALE=0.166` is not
+uniformly wrong: ordinary percentiles such as p98 remain close to native on the 1729
+capture, while the generated whitePoint is catastrophically low (`~0.166` vs native
+`~2.555`). Reconstructing the uploaded edited HEIC's alternate HDR signal directly from
+its primary + native gain map + ISO tmap yields a real scene-referred p99.9 near `5.25`,
+proving that this capture contains substantial highlight range absent from the SDR-only
+statistics. However, other native captures with similar nominal HDR headroom have
+LinearImage whitePoint only around `0.30–0.35`, so whitePoint cannot safely be derived from
+headroom or a fixed HDR percentile alone. Do not replace the fixed scale globally until
+the CF-CM device matrix identifies which fields actually control Photos HDR rendering.
+
+## 10.125 — Source Style parameters and native Portrait state are immutable (2026-10-19)
+
+A real production bug was found while adding the new regressions. `web/src/styles/port.js`
+previously allowed `nativePortraitRebuild` to replace a valid source MakerNote 0x54 with a
+Bright compromise or the neutral profile Standard marker. That could silently reset the
+user's Style controls. The automatic mutation has been removed: when a valid native 0x54
+exists, reconstruction now keeps its payload and TIFF type exactly. The Bright compromise
+is explicit-diagnostic-only via `opts.reconstructedBright===true`; a profile fallback is
+reserved for the case where no valid native selection exists.
+
+`IMG_1735.HEIC` provides a non-zero flattened Style fixture: Standard, Tone `-1`, Colour
+`+1`, Palette `1`. The generic BZ + CE reconstruction preserves its six-key 0x54
+byte-exact, and the reconstructed file remains `portraitEligibility === null` with no
+native depth, so AI Portrait is still available normally.
+
+Native Portrait preservation was verified independently with `IMG_1119.HEIC`. Before and
+after the Styles/Texture graph reconstruction, the native depth payload hash is identical
+(`45d75c8c74660a3c`) and its renderer-XMP hash is identical (`36affcc09a41351c`). The XMP
+continues to report simulated aperture ƒ/2.8 and Portrait Lighting EffectStrength `0.5`.
+The same reconstruction also preserves Style ID 16, Tone `-0.5`, Colour `+0.5`, Palette
+`1`, and remains classified `existing-depth`, so the AI depth path cannot replace native
+Portrait data. `1163_Off.HEIC` independently confirms the existing-renderer contract with
+ƒ/4.5 and EffectStrength `0.5`. These source-owned depth/rendering payloads are now explicit
+release invariants alongside the source 0x54 marker.
+
+## 10.126 — CF-CM/CJ do not recover native HDR brightness; plist calibration branch closed (2026-10-19)
+
+The user reports that every HDR calibration variant in the phone batch remains darker than
+the original flattened edited source. This includes CK/CL/CM, full LinearImage CF, root
+range/gain CG, combined CH, wider core CI and even full same-capture native Styles plist CJ.
+Therefore the residual HDR attenuation is not controlled by the tested Styles-plist
+calibration fields. Do not generate further plist-calibration variants for phone testing.
+
+Local scene reconstruction provides an important separation: `IMG_1729 (2).HEIC` (the
+flattened edited source) and CE `IMG_1864.HEIC` produce numerically identical HDR signal
+from their primary + gain map + ISO tmap under the ISO formula (scene p99.9 about 5.25,
+max about 5.29). Yet Photos displays CE darker. The attenuation is therefore an Apple
+Photos interpretation/context switch caused by the reconstructed editable graph, not a
+loss of gain-map image data or nominal headroom.
+
+The strongest remaining structural distinction is the tmap application mode. The flattened
+edited source uses `useBaseColorSpace=false` (flags 0) with offset 0.005, while the native
+same-capture full editable graph uses `useBaseColorSpace=true` (flags 0x40) with tiny
+0.00001 offsets. Historical experiments have not isolated the base-colour-space flag by
+itself. Future device testing must be sparse: at most one evidence-backed candidate per
+round, not a matrix. The bounded CN candidate toggled only `useBaseColorSpace` on the accepted CE contract;
+every other payload and tmap numeric parameter remained exact. On-device, CN did not
+improve HDR brightness and HDR disappeared when entering Edit. Therefore the single tmap
+mode flag is not the missing contract and must not be promoted.
+
+## 10.127 — Flattened and editable HDR use different gain-map/tmap encodings of nearly the same log-gain field (2026-10-19)
+
+Local comparison of the same capture finally isolates a structural HDR conversion that
+Photos performs when exporting the current edited rendition. The native full editable
+`IMG_1729.HEIC` uses a 2856x2142 gain grid made from 15 monochrome 640x896 HEVC tiles.
+The gain grid has `nclx 2/2/2` colour metadata, the tiles have no per-tile ICC profile, and
+the editor tmap owns a large adaptive PQ ICC profile. The flattened edited
+`IMG_1729 (2).HEIC` instead stores the same-size gain grid as 30 monochrome 512x512 tiles;
+the grid and every tile carry Apple's 368-byte `Linear Gray` ICC profile, while the tmap
+uses a simple P3/PQ `nclx` declaration. CE retains this flattened gain-map representation
+and merely adds the legacy `auxC + auxl` editor routing, which makes Photos interpret the
+samples under a contract they were not encoded for.
+
+The raw gain maps are strongly related rather than unrelated images. Across 6,117,552
+pixels, native-full vs flattened raw samples have correlation `0.9933311`; a direct affine
+fit is approximately `native = 0.905866*flattened + 0.101537`. More importantly, decoding
+each file's samples through its own ISO tmap curve shows that the underlying logarithmic
+gain fields agree to mean absolute error about `0.0189 EV` (RMSE `0.0335 EV`). Re-encoding
+the flattened log-gain field with the native full curve predicts the native raw gain map
+with sample-domain MAE `0.00815` on [0,1], roughly two 8-bit levels. The same relationship
+repeats with `IMG_1768.HEIC`.
+
+This proves that Photos' current export re-encodes an almost identical HDR signal into a
+different `(gain-map samples + tmap curve + colour/profile)` pair. Stylio cannot restore
+an editable graph by adding `auxC/auxl` to the flattened pair. It has to convert the pair as
+a unit: decode the source gain samples to log-gain using the source tmap, choose/derive an
+editor-compatible target curve, re-encode the log-gain field into that target curve, and
+emit the matching editor gain-map/tmap colour contract. Any conversion must preserve the
+scene-referred HDR signal numerically before device testing.
+
+Native editor tmap ICC profiles are adaptive rather than constant. Same-generation iPhone
+16 captures contain image/style-specific ICC profiles with private Apple `HAGC` and `hdgm`
+tags; the profile hashes and tag lengths vary by capture/style while `cicp` remains P3/PQ.
+Therefore copying one donor profile or hardcoding one native tmap curve is not a valid
+production solution. The next research work is source-derived editable HDR authoring,
+including reconstruction of the adaptive gain-curve/profile contract. No new phone
+candidate should be emitted until this conversion passes local log-gain parity and graph
+invariants.
+
+## 10.128 — Source-only HAGC parser + generic Display-P3/PQ ICC path passes local CMM and editor-state invariants (2026-10-19)
+
+The source-only HDR work now has a standards-backed path that does not require reproducing
+Apple's image-specific private ICC bytes. `web/src/raster/hagc.js` parses and serializes
+SMPTE ST 2094-50 Application #5 payloads, including the Apple HAGC ICC wrapper and the
+observed Apple one-byte-short internal length convention. The parser round-trips the native
+HAGC payload byte-exact on the same-capture 1729 file and on the iPhone 16 Style corpus.
+Across nine native iPhone 16 samples, `HAGC.baselineHdrHeadroom` equals `tmap.max` after the
+native 1e-4 quantization (only a few 1e-5 floating-point difference). This makes HAGC
+baseline headroom derivable directly from the uploaded edited file.
+
+The module also implements ST 2094-50 Reference White Tone Mapping (RWTMO) expansion and
+piecewise-cubic gain-curve evaluation. RWTMO is retained as the standards-defined fallback;
+it does not pretend to reproduce Apple's custom per-image HAGC control points.
+
+`web/src/raster/editable-hdr-pair.js` now provides the source-only mathematical core for
+re-encoding ISO gain maps while preserving log2 gain. Tests verify that a flattened
+(min=0, max=2.39648, gamma=1) 8-bit gain field can be re-encoded into the observed native
+curve with mean quantization error below 0.004 EV without clipping. This code is not wired
+into production yet.
+
+A second important simplification comes from current Skia HDR ICC support. A valid HAGC
+profile does not need Apple's private adaptive `hdgm`/13^3 CLUT bytes: Skia can author a new
+Display-P3/PQ ICC v4.4 profile from public colour constants and attach the serialized HAGC
+payload. `web/src/raster/pq-hagc-icc.js` ports that deterministic construction: 65-entry PQ
+input curves, an 11^3 maxRGB-aware A2B CLUT, Display-P3 -> XYZ D50 matrix, identity B2A,
+CICP 12/16/0/1 and a caller-supplied HAGC tag. No native/donor ICC payload is copied.
+
+The generated 9,196-byte profile passes both internal structural tests and independent
+LittleCMS/Pillow validation: LittleCMS opens it, reads the description, builds an RGB ->
+sRGB transform and successfully transforms pixels. FFmpeg also decodes a HEIC whose tmap
+`colr` is replaced by this profile without container/codec errors.
+
+The local CE-derived HEIC experiment changes only the tmap `colr` property from P3/PQ nclx
+to the generated Display-P3/PQ + RWTMO-HAGC ICC. All item payloads remain byte-exact,
+including tmap metadata and every gain-map HEVC tile; the item-reference graph and source
+0x54 marker are exact, and the worker still classifies the result `known-compatible`.
+Cross-regression also passes on non-zero Style parameters and native Portrait: Standard
+Tone -1 / Colour +1 is preserved; the no-depth file remains AI-Portrait eligible; the
+Portrait fixture retains Style 16 Tone -0.5 / Colour +0.5, native depth hash
+`45d75c8c74660a3c`, renderer hash `36affcc09a41351c`, aperture f/2.8 and Portrait Lighting
+strength 0.5. Production remains unchanged pending one device-level ColorSync/Photos
+validation of this standards-backed profile path.
+
+## 10.129 — CO rejected on-device; weak HDR is traced to the reconstructed linear thumbnail losing the gain-map highlight tail (2026-10-19)
+
+The user tested the generated-PQ/HAGC candidate CO on-device. `IMG_1917.HEIC` is SHA-256
+byte-identical to the staged CO file, so transport/import did not mutate it. CO still renders
+weaker HDR than the original flattened edited source and entering Photos Edit removes HDR
+from the preview. Therefore a standards-valid generic Display-P3/PQ + RWTMO-HAGC ICC is not
+sufficient to make Photos adopt the native editable-HDR contract. That branch remains useful
+for standards research only and must not be promoted.
+
+The remaining difference is now localized to the reconstructed `linearThumb`. CA/CE built
+that 1024x768 resource from the SDR current primary by affine remap. This reproduces most
+midtones but mathematically cannot represent the sparse HDR highlight tail carried by the
+source gain map. Same-capture decoded statistics make the loss explicit. Native 1729
+linearThumb luma has median `0.47393`, p99.5 `0.64144`, p99.9 `0.97776`, p99.99 `0.98069`
+and max `0.99918`; CE/CA has nearly the same median (`0.47237`) but p99.9 only `0.64909`,
+p99.99 `0.65136` and max `0.65951`. Thus the earlier low whole-image MAE hid a severe error
+in precisely the specular pixels relevant to HDR editor reconstruction.
+
+Reconstructing the uploaded edited source's alternate scene from its own primary + gain map
++ ISO tmap shows the missing signal directly: the same sparse highlights reach about `5.25x`
+SDR white. Comparing native linearThumb against the CA primary-only prediction as a function
+of the source gain sample gives a sharp high-gain residual. Below gain ~0.6 the residual is
+small; gain 0.6-0.7 averages about +0.159 luma, 0.7-0.8 +0.215, 0.8-0.9 +0.255 and 0.9-1.0
++0.327. On the 2,371 same-capture pixels with `g >= 0.55`, a simple diagnostic fit is
+`delta = 0.6915016*g - 0.3595679`, zero-crossing near `g=0.51998`, with residual-fit MAE
+about `0.00941`. These coefficients are same-capture research evidence, not production
+constants.
+
+`tools/native-style-hdr-linear-thumb-candidate.mjs` builds one causal diagnostic CP from the
+known-good CE graph. It keeps CE's original flattened tmap/nclx and every non-linearThumb
+item payload and graph relationship byte-exact. It changes only the linearThumb samples,
+adding `max(0, delta)` from the exact uploaded source gain map to the already accepted CA
+midtone reconstruction. Only 13,175 of 786,432 thumbnail pixels (~1.675%) are changed.
+After Main10 full-range HEVC encode/decode, CP's luma p99.9 is `0.97593` and p99.99 is
+`0.97985`, essentially restoring the native `0.97776/0.98069` tail while preserving the
+midtone distribution. Pixel-wise native-vs-thumbnail MAE improves from `0.01236` (CE) to
+`0.01159`, RMSE from `0.02088` to `0.01432`, and worst-case error from `0.36425` to
+`0.17539`. Worker classification remains `known-compatible`; Styles/Texture and the source
+0x54 selection remain unchanged.
+
+CP is therefore the only current phone candidate. Its purpose is to prove causality: whether
+the missing HDR tail in `linearThumb` caused Photos' weak editable HDR. Even if CP succeeds,
+production must derive a generic source-only linearThumb HDR transform from independent
+native captures / the underlying Apple encoding rather than ship the 1729-fitted constants.
+
+## 10.130 — Generic HDR-aware linearThumb reconstruction is implemented; Portrait call-site bug fixed (2026-10-19)
+
+The production direction no longer uses CP's 1729-fitted residual. A generic source-only
+model was fitted on eight independent native iPhone 16 captures from the Styles corpus and
+validated with 1729 held out completely. The model combines the uploaded current primary
+with scene-referred HDR reconstructed from that same file's one-channel ISO gain map/tmap:
+`primary + HDR excess at scene thresholds 0.75 / 1.5 / 2.5 + bias`. On held-out 1729 the
+primary-only model leaves p99.9 near 0.62, while the generic HDR hybrid restores the encoded
+linearThumb tail to about 0.999 versus native 0.978 without materially moving the midtone
+(median 0.4727 vs native 0.4739). Decoded hybrid-vs-native whole-thumbnail MAE is about
+0.01248 and RMSE 0.01766. The native max itself is approximately 1.0, so no 1729-specific
+hard cap is introduced.
+
+The implementation now lives in `web/src/raster/hdr-linear-thumbnail.js`; the fixed
+coefficients are corpus-trained, not per-photo. `web/src/codecs/linear-thumbnail.js`
+recognizes a strict one-channel ISO `tmap` whose inputs are the current primary + gain grid,
+samples both source grids directly at linear-thumbnail resolution, reconstructs scene HDR,
+then encodes a native-shaped 10-bit full-range VUI 2/2/2 HEVC linear thumbnail. Supported
+HDR graphs are forbidden from silently falling back to an SDR-only linear thumbnail.
+`web/src/raster/heic-grid-sample.js` performs tile-local bilinear sampling so the browser
+never needs a full-resolution RGB canvas for this reconstruction.
+
+A separate production bug was found in `file-processor.js`: linear-thumbnail generation was
+gated on `d.thumbnail === null`. Native Portrait flattened exports such as `IMG_1119.HEIC`
+already contain an ordinary SDR thumbnail (`thumbnail=32`) while still having
+`linearThumb=null`, so they bypassed the HDR-aware generator and the graft path could reuse
+the ordinary thumbnail as the Styles linear resource. Both reconstruction call-sites now
+gate on `d.linearThumb === null` instead. `graftPatch()` also prefers a real existing source
+linearThumb over an ordinary thumbnail and supports construction-method-1 payloads. Thus
+native Portrait inputs now receive the same HDR-aware linear reconstruction while keeping
+the source depth/renderer state, and files with a genuine existing linearThumb are not
+regenerated.
+
+Targeted pure-JS regression tests initially passed 9/9 for HDR linear-thumbnail math, grid
+sampling and native Styles rebuild preservation. No PQ/HAGC ICC replacement is part of the
+production fix; CO/CN remain rejected research branches. Production source Style selection
+(`0x54`, including non-zero Tone/Colour/Palette), Texture, native depth, aperture and
+Portrait Lighting remain independent preservation invariants.
+
+## 10.131 — Current-export routing bug fixed; HDR-aware reconstruction now actually runs in production (2026-10-19)
+
+A second production control-flow bug was found after the HDR-aware linearThumb implementation
+was complete. `nativeStyleExportTextureCandidate()` correctly recognized the proven iPhone
+16/17 six-key Current-export shape, and `preserveIncomplete` correctly exempted it from
+preserve-only. However, the later Texture-only branch still matched `textureOnly===true`
+before graph reconstruction, so the candidate could be sent through `addTextureInWorker()`
+instead of `patchInWorker()`. In other words, the new hybrid linearThumb could be correct but
+never run for the exact 1729 class it was designed to repair.
+
+The Texture-only route is now centralized in `useTextureOnlyNativeStylePath()`. A complete
+native Styles graph remains Texture-only; ordinary native-style inputs remain Texture-only;
+but a proven edited Current export and any native Portrait rebuild explicitly bypass that
+fast path and continue to graph reconstruction. Tests cover presets 1/4/8/16 and the actual
+`native-1.HEIC` / `native-2.HEIC` files where available. Opaque or unsupported native markers
+still stay on preserve-only, and the same-capture unedited Bright full graph still produces
+the previously device-working Texture output unchanged.
+
+HDR linear-resource handling is now defended at three layers. The file processor generates
+whenever `d.linearThumb===null`; `port.patch()` gives a specific error if a strict ISO HDR
+pair reaches reconstruction without a generated/source linearThumb; and `graftPatch()` also
+refuses an ISO HDR pair that would otherwise fall back to an ordinary SDR thumbnail. When a
+real source linearThumb does exist, graft prefers it over the ordinary thumbnail, including
+construction-method-1 payloads. A new synthetic regression proves both the refusal and the
+source-linear preference.
+
+The current focused regression set passes 20/20: Current-export recognition/routing,
+complete-native Texture preservation, opaque-marker preserve-only, HDR linear-thumbnail
+math, grid sampling, strict HDR linear-resource fail-safe, source-linear preference, and
+native graph rebuild preservation. Service-worker cache is bumped to v226 and includes the
+new HDR/grid modules so installed PWAs do not mix the new `linear-thumbnail.js` with stale
+runtime dependencies.
+
+## 10.132 — Linear-thumbnail invariant finalized; legacy compatibility preserved without SDR fallback (2026-10-19)
+
+The linear-resource invariant is now global inside the Styles graft path: an ordinary SDR
+thumbnail is never accepted as a Styles `linearThumb`. `graftPatch()` either receives an
+explicit generated linear resource or reuses an actual source `linearThumb`; otherwise it
+fails. `port.patch()` enforces the same boundary before graph mutation. This prevents the
+original HDR regression from reappearing through another caller.
+
+The stricter invariant initially broke direct legacy-compatibility callers that historically
+relied on the source ordinary thumbnail. That path was repaired without weakening native/
+Current reconstruction: `legacyCompatibilityExport()` now falls back to the real
+`donor_linear_thumb_item` from the known baseline target profile when the caller does not
+provide a source-derived generated linear thumbnail. App callers still provide the
+HDR-aware source-derived thumbnail. No compatibility path silently substitutes the source
+SDR preview anymore.
+
+The focused native/current/compatibility regression set now passes 81/81. This covers the
+Current-export router, native Portrait/Styles graph reconstruction invariants, strict
+linear-resource handling, complete-native Texture preservation, compatibility firewall,
+legacy recovery, mutation-budget checks and HEIC worker API behavior. No full-resolution
+FFmpeg corpus run is required for this verification.
+
+## 10.133 — Production headroom gate still used obsolete preset-replacement reports (2026-10-19)
+
+The user supplies `IMG_1729 (3).HEIC` (native Current Standard) and the current website output
+`IMG_1921.HEIC`. Device feedback: colours are stable in viewer and Edit, HDR is present in
+the viewer, disappears inside Edit, then returns after saving. HDR is slightly weaker than
+the native source. This supersedes any assumption that implementing the generic HDR-aware
+linear thumbnail already validated HDR persistence on the device.
+
+Direct comparison verifies exact source primary/HDR grid descriptors and all corresponding
+HEVC tiles, exact ISO tmap, and exact selected Style marker. Both use alternate headroom
+2.396483898162842 stops (ratio 5.265183813219286), gamma 1 and offsets 0.005. The output has
+the HDR `auxC` and `auxl` but no Apple HDR headroom sidecar. Its graph contains 156 items.
+
+The worker still enabled `registerTmapHdr({headroom:true})` only when the patch report was
+`bright-palette70` or `portrait-standard`. Real source-selection preservation intentionally
+stopped producing those labels, and the newly enabled Current-export path produces neither.
+Thus the production path omitted the editor declaration even though the established E/F
+reconstruction path included it. A worker-level regression reproduces the missing declaration
+(0 rather than 1) before the fix. The worker now enables source-derived headroom for recognized
+six-key native Current exports and explicit native Portrait rebuilds independently of preset
+replacement labels. Existing complete-native Texture and opaque preserve-only paths retain
+their prior behavior. No source Style parameter is changed.
+
+`tools/repair-rebuilt-native-hdr.mjs` creates one bounded CQ repair directly from IMG_1921,
+requiring its source native Current reference and verifying capture/selection identity plus
+all image/HDR payloads. CQ adds exactly one HDR metadata item (433 bytes). Every existing
+payload, property and outgoing reference, including the new HDR-aware linear thumbnail and
+Styles/Texture graph, is byte-exact against IMG_1921. The headroom ratio is derived from its
+own tmap; no gain samples, tmap curve, ICC, coefficients or brightness compensation change.
+CQ is worker-readable and known-compatible. Its HTTP download matches the staged file exactly.
+Physical Photos validation remains pending. Earlier CA/CE results also show that the presence
+of this sidecar alone does not prove native HDR intensity, so the slight darkness is not
+declared fixed and no rejected plist/ICC branch is reopened.
+
+Validation also exposed eight pre-existing Portrait tests whose callers omitted the newly
+required encoded linear thumbnail, and two of their expectations still required resetting a
+real native selection to a compromise/default preset. These fixtures now explicitly supply
+an encoded test linear resource and assert the real source Style/Tone/Colour/Palette remains
+exact. All 42 Portrait tests pass, including source depth, aperture, HDR and renderer checks.
+The complete targeted run passes 69 tests, skips 4 absent optional fixtures, and has no failures.
+PWA validation initially found three uncached research runtime modules; those modules are now
+listed without enabling their experimental conversion paths. PWA check passes. Cache is v227.
+
+## 10.134 — CQ confirms HDR persists in Edit; isolate gain-map colour-carrier metadata (2026-10-19)
+
+The user confirms CQ keeps HDR when entering Photos Edit. The remaining issue is slightly
+lower HDR brightness than the native Current Standard source. CQ is now the device-accepted
+HDR-presence baseline; production retains the v227 worker headroom fix. This feedback does
+not establish exact native HDR intensity or calibration parity.
+
+A distinct, previously untested carrier difference remains. The flattened source and CQ
+associate a 356-byte GRAY ICC with the gain grid and each of its 30 tiles, plus an unspecified
+full-range nclx 2/2/2 declaration on the grid. The native full Styles capture uses only that
+nclx declaration on its gain grid and no tile colr. The inherited ICC has identity kTRC
+(`curv`, one gamma value 1.0) and D50 white point; it is a data-channel profile, not the
+Display-P3 primary image profile. Whether Photos interprets it differently after Styles
+reconstruction is a hypothesis, not an established cause of the attenuation.
+
+`tools/native-style-gain-data-color-candidate.mjs` creates one CR diagnostic from accepted CQ.
+It removes only those 31 identity Gray ICC property associations. All 157 item payloads,
+references and unrelated properties remain exact: primary image/profile, gain samples,
+ISO tmap equation, editor headroom, linear thumbnail, Styles, Texture, Exif and selected
+Style controls are unchanged. Thus the raw ISO gain signal remains mathematically identical;
+this is not a brightness multiplier or a rescaled gain map. The remaining grid declaration
+matches the native data-only nclx shape. Worker classification is known-compatible and the
+HTTP download matches the staged file exactly. CR is not enabled in production until device
+testing establishes brightness, colour, Styles/Texture and HDR persistence. No rejected
+Styles-plist, tmap-mode or generated-PQ/HAGC branch is reintroduced.
+
+## 10.135 — CR rejected; isolate unproven prefilter research, retain CQ (2026-10-19)
+
+The user reports CR really does not look different from CQ. Removing the identity Gray ICC
+associations therefore has no observed HDR-brightness benefit and is not enabled in the
+production route. CQ remains the device-confirmed baseline for correct colour, Styles/Texture
+and HDR persistence in Edit; exact HDR brightness against native is still unresolved.
+
+One further diagnostic examined the order of HDR scene reconstruction and thumbnail
+downsampling. The corpus model reconstructs scene HDR before resizing, while the accepted
+browser sampler first averages encoded primary/logarithmic-gain samples. A synthetic sparse
+highlight demonstrates that these nonlinear operations differ. A sparse-neighbour version
+was implemented temporarily and exercised through the actual browser sampling functions
+with a native FFmpeg decoder adapter on the supplied Current export. The source upload alone
+supplies every output resource; the unedited Bright original is read only as a metric
+reference. This does not execute Apple's Photos renderer.
+
+Measured raw prediction MAE changes from 0.01260687997 to 0.01258813036, only 0.1487% relative;
+RMSE changes from 0.01797599586 to 0.01794612195. In the native-reference luma >0.9 region,
+the mean signed error is already positive (+0.02449245), and the experiment increases it
+slightly (+0.02452874). Thus neither the small aggregate improvement nor a blanket headroom/
+gain increase establishes a fix for the user's HDR-intensity symptom. A generated CS file
+changes only the reconstructed linear thumbnail and its codec description, retains all
+other CQ item payloads/references, and passes container checks. It was NOT served or tested
+on the phone and must not be described as visually validated.
+
+The complete prototype and its mathematical tests are isolated in ignored
+`artifact/build/hdr-1921/prefilter-research/`, with metrics in
+`artifact/build/hdr-1921/IMG_1921_CS_HDR_Prefilter.HEIC.json`. Its temporary browser changes
+and tracked-tree tool were removed, retaining the accepted CQ implementation and v227.
+Twelve isolated research tests pass; the accepted native/Portrait/HDR regression set still
+passes 69 tests, skips 4 optional fixtures, and has no failures.
+
+No Current export of CQ after Photos Edit/Done has been supplied yet. The existing
+IMG_1921 predates CQ's headroom repair and any re-render performed by Photos. A same-capture
+post-edit Current export of CQ, paired with the existing native Current Standard file, is
+the next required artifact for measuring the actual rendered HDR discrepancy. Do not infer
+native display parity from item hashes, numerical maximum headroom or synthetic model tests,
+and do not replace the accepted baseline with another visually unproven compensation.
+
+## 10.136 — IMG_1925 isolates HDR reader ambiguity; CT supplies a separate Apple fallback (2026-10-19)
+
+The requested post-Edit/Done Current export is supplied as
+`C:/Users/WanThinnn/Downloads/IMG_1925.HEIC` (2,073,340 bytes; SHA-256
+`2e55bcb1705d081ffbc5fa3c13ac1ad3a0ae6b251543c5a74fe198614fe8dd96`). Photos removes
+the ISO tmap and standalone Styles/Texture graph from this rendered export, retains the
+same six-key Standard selection, and writes an Apple auxiliary HDR map with version 131072
+and headroom 5.265183925628662. The native Current/CQ ISO headroom is 5.265183813219286;
+the difference is float rounding, not an observed headroom reduction. This inventory does
+not imply that Photos has lost controls on the asset kept in its library.
+
+The gain field remains 2856x2142; Photos retiles 30 512x512 tiles into 15 640x896 tiles.
+Independent FFmpeg luma decoding finds 84.04% identical gain codes at the sampled positions,
+with mean absolute difference 0.2041 of one 8-bit code. The primary ICC profile is byte-exact
+against native. Mean encoded primary-channel difference is 0.00881146; the Texture nudge
+and Photos rendering mean this is not an exact no-op pixel comparison. Stored orientation
+is checked and is identity for both supplied files.
+
+Version 131072 alone does not prove which gain equation a reader uses, as already noted in
+10.70. The comparison therefore evaluates both interpretations explicitly. Treating IMG_1925
+as normalized logarithmic gain with zero offsets leaves the brightest region about 0.4%
+below source, while much of the image is slightly above source. Applying the documented
+Apple Rec.709 multiplier equation instead gives integrated luminance about 9.3% below source.
+These are numerical interpretations of the actual exported planes, NOT measurements of
+the iPhone display and NOT proof of which internal Photos reader ran. The latter is a
+specific hypothesis consistent with the user's slight HDR attenuation. Relevant primary
+sources: https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
+and https://raw.githubusercontent.com/google/skia/main/src/shaders/SkGainmapShader.cpp .
+
+`tools/lib/iso-apple-fallback.mjs` implements a diagnostic conversion from source ISO scene
+luminance to an independently encoded Rec.709 Apple auxiliary map. It includes the actual
+source ISO offsets, uses the same source-derived headroom, and reports clipping and black
+pixels that a zero-offset single-channel multiplier cannot represent. Two mathematical
+tests fail for the old relabel-only samples, then pass after conversion. All four new math
+tests pass, and the targeted HDR/native set passes 18 tests. This verifies the diagnostic
+equation, not the user's device symptom.
+
+`tools/native-style-apple-fallback-candidate.mjs` builds a single CT diagnostic from accepted
+CQ and the supplied Current Standard only; the original Bright capture is not read or
+imported. CT keeps the source ISO gain grid/tiles and tmap exact for ISO readers. It removes
+the Apple auxiliary role from that ISO numerical plane, adds a separate source-derived
+Apple map (grid 158 plus 30 losslessly encoded tiles), and retargets HDR sidecar 157 to that
+map with version 65536 and the same headroom. All prior payloads except that one HDR XMP
+remain exact, including primary, Exif/Style selection, linear thumbnail, Styles, StyleDelta,
+Texture, source ISO gain samples and tmap. Their protected property associations also stay
+exact. This is not the rejected original-Bright/editor-base branch or a global HDR boost.
+
+On all 6,117,552 source gain pixels, the old relabel-only Apple interpretation has mean
+absolute scene-luminance error 0.06348968 and integrated ratio 0.89145149. CT's converted
+Apple interpretation has error 0.00112112, integrated ratio 1.00011827, and integrated
+absolute error 0.1917% of source luminance. There are 306 over-headroom samples and 306
+unrepresentable black samples; exact RGB/offset recovery is not claimed. A separate decode
+of all 30 encoded CT tiles matches the converted pixel array exactly. The complete output
+is 2,997,240 bytes, SHA-256
+`32fc16dc30c35928cf6c3748bbd7ae72f37018b2945b198ee1a9245f57090e8a`, and worker-read
+classification is known-compatible. Numerical reports and independent audits are ignored
+under `artifact/build/hdr-1921/`.
+
+CT and accepted CQ alone are served on a one-hour allowlisted Wi-Fi page; the downloaded
+CT is byte-exact and unlisted files return 404. CT still needs physical confirmation of
+HDR brightness, HDR persistence in Edit, correct colour and Styles/Texture controls before
+any production adoption. Two gain planes require explicit pipeline support: the ordinary
+discovery hdrGrid selector prefers the Apple auxiliary, which deliberately differs from
+the ISO tmap input. Do not silently ship this diagnostic through the existing single-plane
+worker. Production remains on CQ routing/cache v227, on master, uncommitted.
+
+## 10.137 — CT still slightly dark; CU isolates the Apple gain transfer curve (2026-10-19)
+
+Device feedback for CT is "temporarily okay, still slightly darker than the original."
+This is not a claim of exact native parity or a quantified improvement over CQ, and no
+separate post-save CT export has been supplied. No new colour/control failure is reported.
+Production remains on the accepted CQ route while the residual is investigated.
+
+Three bounded hypotheses are considered: a different auxiliary gain transfer, reduced
+declared headroom, and quantization. Headroom is still source-exact, and CT's integrated
+bias under its intended Rec.709 equation is slightly positive (+0.0118%), so a uniform
+brightness increase is not justified by either of those latter measurements.
+
+There is a specific alternative transfer in primary source code. Skia's Apple gain-map
+shader uses `sample^1.961` rather than the exact piecewise Rec.709 inverse:
+https://raw.githubusercontent.com/google/skia/main/src/shaders/SkGainmapShader.cpp .
+This is evidence about Skia, NOT evidence that Photos uses Skia or that iOS necessarily
+uses the same approximation. The diagnostic prediction is that if that power reader is
+selected, the CT curve will under-represent scene luminance slightly, and an inverse of
+that exact power must recover the source signal without changing source headroom or colour.
+
+The prediction is measured on all 6,117,552 source gain pixels: CT's Rec.709 codes under
+the power reader produce integrated ratio 0.98906734 (about 1.09% lower) and integrated
+absolute error 1.1294%. An inverse-power-1.961 encoding produces ratio 1.000099999 and
+integrated absolute error 0.2035%. Bright-region ratios vary with threshold; this is not
+a global gain/brightness factor and is not a measured percentage of iPhone display loss.
+Both endpoints retain their gain range, and the 306 clipped / 306 unrepresentable-black
+limitations of the single-channel fallback remain reported.
+
+`isoToAppleFallback()` now permits only two explicit diagnostic transfers: the default
+`bt709` used for CT, and `power-1.961`. Unknown transfer names fail instead of guessing a
+gamma. Two new tests fail before that option is implemented, then pass; the previous four
+math tests also pass. This changes no browser runtime or public processing behavior.
+
+The single CU device diagnostic is generated from the same CQ and uploaded Current file
+with `--apple-power-1961`. It is 2,955,623 bytes, SHA-256
+`5e7d6a1aee3e63bb0ec7fedb33d366b4eef413e932af85a4d6f2eb302d02c246`.
+An independent decode matches all 6,117,552 expected power-encoded gain pixels exactly.
+Comparison against CT proves only its 30 auxiliary HEVC tile payloads differ: every other
+item payload, every item property including hvcC/colour, all graph references, source ISO
+gain/tmap, primary pixels/profile, Style selection, Styles/Texture and linear thumbnail
+remain exact. Worker-read classification remains known-compatible. Reports and audits are
+under ignored `artifact/build/hdr-1921/`.
+
+The focused HDR/native/diagnostic set passes 20 tests. CU and CT alone are available through
+the one-hour allowlisted Wi-Fi page; CU's HTTP download is byte-exact and unlisted files
+return 404. Device brightness, colour, HDR persistence in Edit and Styles/Texture controls
+remain pending for CU. A favourable curve-only result will not by itself establish generic
+support for the dual-plane graph; explicit production reader/routing support is still
+required before replacing CQ. Master remains uncommitted and browser cache remains v227.
+
+## 10.138 — Accept the residual HDR difference and publish the proven route (2026-10-19)
+
+The user reports CU is still essentially the same, explicitly accepts a small HDR brightness
+reduction, and authorizes committing and pushing on master provided the original-photo
+pipeline remains safe. No extra HDR compensation is required for this delivery.
+
+The selected release is the existing CQ/v227 browser route: recognized iPhone 16/17 Current
+exports reconstruct the missing editor graph using the uploaded selection/pixels and the
+source-derived HDR-aware linear thumbnail, then declare source HDR headroom. Full native
+originals keep their existing Texture-only route. CT/CU supplied no clear device benefit
+that warrants adopting their dual-plane graph; they and the offline candidate generators
+remain local research. The release does not enable a guessed brightness factor, native
+donor image, replacement preset, PQ/HAGC conversion, or auxiliary-gamma experiment.
+
+Original-photo verification exercises the real file processor/classifier/worker with AI
+disabled. The supplied original Bright IMG_1729 output matches the historical stylio-1
+control byte-for-byte; HDR-native likewise matches HDR-stylio byte-for-byte. Every source
+payload, property and outgoing reference is preserved by those tests. A portable complete
+native-graph regression covers presets 1/4/8/16, non-neutral controls, equality with the
+existing Texture writer, input immutability and repeated processing without duplicate
+Texture/HDR resources. It fails if the processor enters profile/decode/rebuild branches.
+The new original/edited-native regression group is required by both browser CI and the
+GitHub Pages pre-deployment checks.
+
+The release validation set passes 280 tests, skips 17 absent optional private fixtures and
+has zero failures across processing, native Styles/Texture/HDR, Portrait, compatibility
+recovery, raster/HDR JPEG import, Soft Skin, Live Photo, metadata, UI wiring and release
+asset versioning. PWA consistency and all three UI languages pass. This is not a claim of
+exact native HDR rendering; the known slight difference is accepted by the user. Personal
+HEICs, decoded caches and LAN download artifacts are excluded from the source commit.

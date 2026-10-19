@@ -1,5 +1,5 @@
 import {patch} from '../styles/port.js';
-import {discoverHeic} from '../core/heif.js';
+import {discoverHeic,extractItem,idatItemBytes,propertyBoxBytes} from '../core/heif.js';
 import {classifyPhotoContract} from './contract-classifier.js';
 import {fingerprintPhotoContract} from './contract-fingerprint.js';
 import {stripAppleEditingContract} from './legacy-sanitize.js';
@@ -27,6 +27,19 @@ function preflightFailureCode(preflight){
 }
 function reportBase(mode){
   return {version:COMPATIBILITY_REPORT_VERSION,engineVersion:COMPATIBILITY_ENGINE_VERSION,mode};
+}
+function profileLinearThumbnail(profile){
+  const id=Number(profile?.manifest?.donor_linear_thumb_item);
+  if(!Number.isInteger(id))throw new Error('Legacy target profile has no linear thumbnail');
+  const d=discoverHeic(profile.meta),item=d.iloc.items.get(id);
+  if(!item)throw new Error('Legacy target linear thumbnail item is missing');
+  const sample=profile.retained.get(id)||(item.constructionMethod===1
+    ?idatItemBytes(profile.meta,id,d.meta):extractItem(profile.meta,d.iloc,id));
+  const hvcC=propertyBoxBytes(profile.meta,d.props,id,'hvcC');
+  const ispe=propertyBoxBytes(profile.meta,d.props,id,'ispe');
+  const pixi=propertyBoxBytes(profile.meta,d.props,id,'pixi');
+  if(!sample||!hvcC||!ispe||!pixi)throw new Error('Legacy target linear thumbnail is incomplete');
+  return {sample,hvcC,ispe,pixi};
 }
 
 export async function legacyCompatibilityExport(source,profile,opts={}){
@@ -75,6 +88,10 @@ export async function legacyCompatibilityExport(source,profile,opts={}){
   });
   const settings={
     ...opts,
+    // App callers normally provide a source-derived HDR-aware linear thumbnail.
+    // Direct compatibility callers keep the old API by falling back to the real
+    // linear resource from the known baseline profile, never the source SDR thumbnail.
+    linearThumb:opts.linearThumb||profileLinearThumbnail(profile),
     experimental:opts.experimental!==false,
     texture:opts.texture!==false,
     compatibilityStyleFallback:'profile',

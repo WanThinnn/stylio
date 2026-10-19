@@ -4,7 +4,7 @@
 
 import { topBox, be, concat, slice, box, boxes, metaChildren, findChild } from "../core/box.js";
 import {
-  parseIloc, parseIpcoIpma, extractItem, propertyForItem, propertyBoxBytes, dimensionsForItem,
+  parseIloc, parseIpcoIpma, extractItem, idatItemBytes, propertyForItem, propertyBoxBytes, dimensionsForItem,
   auxUriForItem, irotAngleForItem, imirAxisForItem, findItemsByType, appendIpcoProperty,
   addItems, auxcBox, ispeBox, refBox, discoverHeic, URI_STYLE_DELTA, URI_LINEAR_THUMB,
   URI_STYLES, MATTE_URI_SET, DEPTH_URI,
@@ -215,13 +215,23 @@ export async function graftPatch(targetData, profile, opts = {}) {
   const primary = td.primary;
   const angle = irotAngleForItem(targetData, td.props, primary);
   const mirror = imirAxisForItem(targetData, td.props, primary);
-  const thumb = td.thumbnail;
-  const linearThumb = opts.linearThumb || {
-    sample: extractItem(targetData, td.iloc, thumb),
-    hvcC: propertyBoxBytes(targetData, td.props, thumb, "hvcC"),
-    ispe: propertyBoxBytes(targetData, td.props, thumb, "ispe"),
-    pixi: propertyBoxBytes(targetData, td.props, thumb, "pixi"),
-  };
+  // A Styles linear thumbnail is a distinct editor resource. Never substitute
+  // the ordinary SDR thumbnail: doing so truncates the HDR highlight tail and
+  // weakens Photos' editable HDR. Callers rebuilding a missing graph must
+  // provide opts.linearThumb; otherwise reuse only an actual source linear item.
+  const sourceLinear = td.linearThumb;
+  const linearThumb = opts.linearThumb || (() => {
+    if (sourceLinear === null) throw new Error('linear thumbnail unavailable');
+    const item = td.iloc.items.get(sourceLinear);
+    return {
+      sample: item?.constructionMethod===1
+        ? idatItemBytes(targetData,sourceLinear,td.meta)
+        : extractItem(targetData, td.iloc, sourceLinear),
+      hvcC: propertyBoxBytes(targetData, td.props, sourceLinear, "hvcC"),
+      ispe: propertyBoxBytes(targetData, td.props, sourceLinear, "ispe"),
+      pixi: propertyBoxBytes(targetData, td.props, sourceLinear, "pixi"),
+    };
+  })();
   let blob = opts.stylesBlob || profile.retained.get(Number(manifest.donor_styles_item));
   report.styleMetadata = opts.stylesBlob ? 'generated-neutral' : 'profile';
 
