@@ -2,7 +2,7 @@
  * Browser E2E smoke for Adaptive HDR JPEG -> AI Detail -> generated HEIC/Styles.
  * Uses the real local ONNX/WebGPU and FFmpeg.wasm path.
  *
- * node tools/smoke-ai-detail-hdr-jpeg.mjs [input] [--model=lite|standard|pro] [--save=tests/private-fixtures/...HEIC]
+ * node tools/smoke-ai-detail-hdr-jpeg.mjs [input] [--model=lite|standard|pro] [--no-detail] [--save=tests/private-fixtures/...HEIC]
  */
 import {createServer} from 'node:http';
 import {readFile,mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
@@ -15,6 +15,7 @@ import {fileURLToPath} from 'node:url';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const input=process.argv.find(arg=>/\.(jpe?g)$/i.test(arg))||'tests/private-fixtures/HDR_Input/IDG_20251020_121945_809.JPEG';
 const model=process.argv.find(arg=>arg.startsWith('--model='))?.slice(8)||'lite';
+const detail=!process.argv.includes('--no-detail');
 if(!['lite','standard','pro'].includes(model))throw Error('Invalid --model');
 const saveArg=process.argv.find(arg=>arg.startsWith('--save='))?.slice(7)||null;
 const saveFull=saveArg?resolve(root,saveArg):null;
@@ -83,7 +84,7 @@ try{
  });
  await cdp('Runtime.enable');await cdp('Page.enable');await sleep(1000);
  const base='http://127.0.0.1:'+port;
- const cfg={base,input,model,save:Boolean(saveFull)};
+ const cfg={base,input,model,detail,save:Boolean(saveFull)};
  const expression='(async cfg=>{'+
    "const [{importRaster},{discoverHeic,extractItemData},{parseTmapMetadata}]=await Promise.all(["+
    "import(cfg.base+'/web/src/raster/raster-import.js'),"+
@@ -94,22 +95,23 @@ try{
    "const name=cfg.input.split('/').at(-1);"+
    "const result=await importRaster(new File([source],name,{type:'image/jpeg'}),null,"+
    "progress=>{if(progress.stage&&(!events.length||events.at(-1)!==progress.stage))events.push(progress.stage);},"+
-   "{analyze:true,detail:{modelId:cfg.model,provider:'webgpu'}});"+
+   "{analyze:true,detail:cfg.detail?{modelId:cfg.model,provider:'webgpu'}:null});"+
    "if(!result.hdr)throw Error('Result is not HDR');"+
-   "if(!result.detailApplied)throw Error('AI detail was not applied: '+String(result.detailSkipped||'unknown'));"+
+   "if(cfg.detail&&!result.detailApplied)throw Error('AI detail was not applied: '+String(result.detailSkipped||'unknown'));"+
    "const d=discoverHeic(result.data);"+
    "if(d.hdrGrid===null||!d.hdrTiles.length)throw Error('Output HDR gain map missing');"+
    "if(d.stylesItem===null)throw Error('Generated Styles item missing');"+
-   "const pair=[...d.infos].find(([id,info])=>info.type==='tmap'&&d.refs.some(r=>r.type==='dimg'&&r.from===id&&r.to[0]===d.primary&&r.to[1]===d.hdrGrid));"+
+   "const pair=[...d.infos].find(([id,info])=>info.type==='tmap'&&d.refs.some(r=>r.type==='dimg'&&r.from===id&&r.to[0]===d.primary&&r.to.length>=2));"+
    "if(!pair)throw Error('ISO tmap metadata missing');"+
+   "const tmapInputs=d.refs.find(r=>r.type==='dimg'&&r.from===pair[0]).to,isoGain=tmapInputs[1];"+
    "const metadata=parseTmapMetadata(extractItemData(result.data,d,pair[0]));"+
    "if(cfg.save){const saved=await fetch(cfg.base+'/__save__',{method:'POST',body:result.data});if(!saved.ok)throw Error('save '+saved.status);}"+
    "return {model:cfg.model,inputBytes:source.length,outputBytes:result.data.length,ms:Math.round(performance.now()-started),"+
    "geometry:result.geometry,hdr:result.hdr,detailApplied:result.detailApplied,detailSkipped:result.detailSkipped||null,"+
-   "hdrDetail:result.hdrDetail||null,primary:d.primary,primaryTiles:d.primaryTiles.length,hdrGrid:d.hdrGrid,hdrTiles:d.hdrTiles.length,"+
+   "hdrDetail:result.hdrDetail||null,primary:d.primary,primaryTiles:d.primaryTiles.length,isoGain,hdrGrid:d.hdrGrid,hdrTiles:d.hdrTiles.length,"+
    "stylesItem:d.stylesItem,tmap:{baseHeadroom:metadata.baseHeadroom,alternateHeadroom:metadata.alternateHeadroom,channels:metadata.channels,useBaseColorSpace:metadata.useBaseColorSpace},events};"+
    '})('+JSON.stringify(cfg)+')';
- console.log('Running '+model+' HDR JPEG AI smoke on '+input+' ...');
+ console.log('Running '+(detail?model+' AI Detail':'source-preserving')+' HDR JPEG smoke on '+input+' ...');
  const out=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},1200000);
  if(out.exceptionDetails)throw Error(JSON.stringify(out.exceptionDetails));
  const value=out.result?.value;if(!value)throw Error('No smoke result');

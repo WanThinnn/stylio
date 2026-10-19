@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {buildAiPortrait} from '../../web/src/portrait/ai-portrait-export.js';
 import {extractItemData} from '../../web/src/raster/heif.js';
-import {extractJpegHdr,parseAdaptiveHdrXmp,encodeTmapMetadata,yuv420Tile,iccColr,yuv420ToRgba,decodeGainLog,encodeGainLog,rebaseGainMapRgba,srgbToLinear,parseTmapMetadata} from '../../web/src/raster/jpeg-hdr.js';
+import {extractJpegHdr,parseAdaptiveHdrXmp,encodeTmapMetadata,yuv420Tile,iccColr,hdrJpegAlternateColr,yuv420ToRgba,decodeGainLog,encodeGainLog,rebaseGainMapRgba,srgbToLinear,parseTmapMetadata,rgbIsoToAppleGain} from '../../web/src/raster/jpeg-hdr.js';
 import {buildRasterHeic,targetGeometry} from '../../web/src/raster/raster-import.js';
 import {buildGeneratedProfile} from '../../web/src/raster/generated-profile.js';
 import {generateSyntheticHevc} from '../../web/src/raster/synthetic-hevc.js';
@@ -11,8 +11,22 @@ import {box,concat,be,topBox,metaChildren,findChild,boxes} from '../../web/src/r
 import {discoverHeic,extractItem,propertyBoxBytes,dimensionsForItem} from '../../web/src/raster/heif.js';
 import {readExifOrientation} from '../../web/src/raster/exif.js';
 import {describeHeic} from '../../web/src/ui/result-metadata.js';
+import {executeJob} from '../../web/src/media/heic-worker.js';
+import {auxUriForItem} from '../../web/src/raster/heif.js';
+import {addItems as addCoreItems} from '../../web/src/core/heif.js';
+import {addItems as addRasterItems} from '../../web/src/raster/heif.js';
 const text=s=>new TextEncoder().encode(s);
 const segment=(marker,data)=>concat([Uint8Array.of(255,marker),be(data.length+2,2),data]);
+function itemHidden(data,id){
+ const iinf=findChild(metaChildren(data,topBox(data,'meta')),'iinf');
+ const start=iinf.off+iinf.hdr+4+(data[iinf.off+iinf.hdr]===0?2:4);
+ for(const b of boxes(data,start,iinf.off+iinf.size)){
+  const v=new DataView(data.buffer,data.byteOffset+b.off+b.hdr,b.size-b.hdr);
+  const item=v.getUint8(0)===2?v.getUint16(4):v.getUint32(4);
+  if(item===id)return Boolean(v.getUint8(3)&1);
+ }
+ throw Error('Missing item '+id);
+}
 function icc(name){
  const words=concat([...name].map(c=>be(c.charCodeAt(0),2))),profile=new Uint8Array(148+28+words.length),v=new DataView(profile.buffer);
  v.setUint32(0,profile.length);profile.set(text('acsp'),36);v.setUint32(128,1);
@@ -79,6 +93,15 @@ test('Indigo ICC v2 descriptions identify Display P3 without an alternate gain-m
  profile.set(text('desc'),148);v.setUint32(156,name.length);profile.set(name,160);
  const hdr=extractJpegHdr(jpegFixture(true,{gainXml:adobeXmp(),baseProfile:profile,alternateProfile:null}));
  assert.deepEqual(hdr.baseIcc,profile);assert.equal(hdr.primaries,'smpte432');
+});
+
+test('HDR rendition colour uses the source ICC or historical extended-linear source primaries',()=>{
+ assert.deepEqual(hdrJpegAlternateColr({alternateIcc}),iccColr(alternateIcc));
+ for(const[primaries,expected]of [['smpte432',12],['bt709',1]]){
+  const b=hdrJpegAlternateColr({primaries}),v=new DataView(b.buffer,b.byteOffset,b.byteLength);
+  assert.equal(v.getUint16(12),expected);assert.equal(v.getUint16(14),8);
+  assert.equal(v.getUint16(16),0);assert.equal(b[18],128);
+ }
 });
 test('ordinary JPEG is SDR; malformed supported HDR contracts never silently become SDR',()=>{
  const sdr=concat([Uint8Array.of(255,216),sof(20,20),Uint8Array.of(255,217)]);
@@ -172,10 +195,126 @@ test('full-range JPEG YUV gain samples convert back to neutral RGB',()=>{
  }
 });
 
+test('RGB ISO gain converts to separate normalized-log Apple RGB data without mutating source planes',()=>{
+ const metadata=parseAdaptiveHdrXmp(adobeXmp());
+ const base=new Uint8ClampedArray([24,48,72,255, 96,128,160,255]);
+ const gain=new Uint8ClampedArray([32,64,96,255, 128,160,192,255]);
+ const baseBefore=base.slice(),gainBefore=gain.slice();
+ const result=rgbIsoToAppleGain(base,gain,metadata);
+ assert.equal(result.samples.length,6);assert.equal(result.channels,3);
+ assert.equal(result.representation,'log2-0x20000');
+ assert.ok(Math.abs(result.headroom-2**metadata.alternateHeadroom)<1e-12);
+ for(let pixel=0;pixel<2;pixel++)for(let c=0;c<3;c++){
+  const p=pixel*4+c,o=pixel*3+c,ch=metadata.channels[c];
+  const linear=srgbToLinear(base[p]/255);
+  const scene=Math.max(0,(linear+ch.baseOffset)*2**decodeGainLog(gain[p]/255,ch)-ch.alternateOffset);
+  const rebuilt=linear*2**((result.samples[o]/255)*metadata.alternateHeadroom);
+  assert.ok(Math.abs(rebuilt-scene)<.025);
+ }
+ assert.ok(result.meanAbsoluteSceneError<.02);assert.ok(result.maxAbsoluteSceneError<.05);
+ assert.deepEqual(base,baseBefore);assert.deepEqual(gain,gainBefore);
+});
+
 const fixture=JSON.parse(fs.readFileSync(new URL('./raster-hevc.fixture.json',import.meta.url)));
 const assets=await generateSyntheticHevc(null,async(_,options)=>{
  const a=options.pixelFormat!=='gray'?fixture.assets.delta:options.width===768?fixture.assets.textureMask:fixture.assets.mask;
  return {...a,hvcc:Uint8Array.from(a.hvcc),payload:Uint8Array.from(a.payload)};
+});
+
+test('both HEIF writers expose HDR alternatives while retaining hidden auxiliary defaults',()=>{
+ for(const add of [addCoreItems,addRasterItems]){
+  const profile=buildGeneratedProfile('48-12',assets);
+  const [meta,ids]=add(profile.meta,[{key:'hdr',itemType:'tmap'},{key:'tile',itemType:'hvc1'},
+   {key:'metadata',itemType:'mime',contentType:'application/rdf+xml'}]);
+  assert.equal(itemHidden(meta,ids.get('hdr')),false);
+  assert.equal(itemHidden(meta,ids.get('tile')),true);
+  assert.equal(itemHidden(meta,ids.get('metadata')),true);
+ }
+});
+
+test('RGB HDR import uses CQ-shaped SDR-primary dual-plane editor contract',()=>{
+ const hdr=extractJpegHdr(jpegFixture(false,{gainXml:adobeXmp(),alternateProfile:null}));
+ const profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta);
+ const geometry={...targetGeometry({width:600,height:900}),exifOrientation:1};
+ const codec=propertyBoxBytes(profile.meta,pd.props,pd.primaryTiles[0],'hvcC');
+ const isoChunks=Array.from({length:geometry.hdrColumns*geometry.hdrRows},(_,i)=>Uint8Array.of(2,i));
+ const appleChunks=isoChunks.map(()=>assets.mask.payload);
+ const bytes=buildRasterHeic(profile,{
+  main:Array.from({length:geometry.primaryTiles},(_,i)=>Uint8Array.of(1,i)),mainHvcc:codec,
+  thumb:Uint8Array.of(3),thumbHvcc:codec,
+  hdrChunks:isoChunks,hdrHvcc:codec,hdrMetadata:hdr.metadata,hdrXmp:hdr.xmp,
+  hdrAlternateColr:hdrJpegAlternateColr(hdr),appleHdrChunks:appleChunks,
+  appleHdrHvcc:assets.mask.hvcc,appleHdrHeadroom:2**hdr.metadata.alternateHeadroom,
+ },null,null,geometry);
+ const d=discoverHeic(bytes),tmap=[...d.infos].find(([,i])=>i.type==='tmap')[0];
+ assert.notEqual(d.primary,tmap,'SDR grid must remain pitm');
+ const inputs=d.refs.find(r=>r.type==='dimg'&&r.from===tmap).to,iso=inputs[1];
+ assert.deepEqual(inputs,[d.primary,iso]);
+ assert.equal(auxUriForItem(d.props,iso),null,'ISO RGB plane must not be Apple auxiliary');
+ assert.notEqual(d.hdrGrid,iso,'Apple editor gain must be a separate plane');
+ assert.equal(auxUriForItem(d.props,d.hdrGrid),'urn:com:apple:photo:2020:aux:hdrgainmap');
+ assert.deepEqual(d.refs.find(r=>r.type==='auxl'&&r.from===d.hdrGrid).to,[d.primary]);
+ const isoTiles=d.refs.find(r=>r.type==='dimg'&&r.from===iso).to;
+ isoTiles.forEach((id,i)=>assert.deepEqual(extractItemData(bytes,d,id),isoChunks[i]));
+ const appleTiles=d.refs.find(r=>r.type==='dimg'&&r.from===d.hdrGrid).to;
+ appleTiles.forEach((id,i)=>assert.deepEqual(extractItemData(bytes,d,id),appleChunks[i]));
+ const sourceXml=d.refs.filter(r=>r.type==='cdsc'&&r.to.includes(iso)&&d.infos.get(r.from)?.type==='mime')
+  .map(r=>extractItemData(bytes,d,r.from));
+ assert.ok(sourceXml.some(x=>Buffer.from(x).equals(Buffer.from(hdr.xmp))));
+ const appleXml=d.refs.filter(r=>r.type==='cdsc'&&r.to.includes(d.hdrGrid)&&d.infos.get(r.from)?.type==='mime')
+  .map(r=>new TextDecoder().decode(extractItemData(bytes,d,r.from)));
+ assert.equal(appleXml.filter(x=>x.includes('HDRGainMapHeadroom')).length,1);
+ assert.ok(appleXml[0].includes((2**hdr.metadata.alternateHeadroom).toFixed(9)));
+ assert.ok(appleXml[0].includes('131072'));
+ assert.ok(d.refs.some(r=>r.type==='cdsc'&&r.from===d.stylesItem&&r.to.includes(tmap)));
+ assert.ok(d.refs.some(r=>r.type==='auxl'&&r.from===d.linearThumb&&r.to.includes(tmap)));
+});
+
+test('third-party scalar/RGB HDR remains an ISO rendition through Texture and Portrait workers',async()=>{
+ for(const gainXml of [adobeXmp(),adobeXmp().replace(/<gm:GainMapMin>[\s\S]*?<\/gm:GainMapMin>/,'<gm:GainMapMin>-0.5</gm:GainMapMin>')
+  .replace(/<gm:GainMapMax>[\s\S]*?<\/gm:GainMapMax>/,'<gm:GainMapMax>3.5</gm:GainMapMax>')]){
+ const hdr=extractJpegHdr(jpegFixture(false,{gainXml,alternateProfile:null}));
+ const profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta);
+ const geometry={...targetGeometry({width:600,height:900}),exifOrientation:1};
+ const codec=propertyBoxBytes(profile.meta,pd.props,pd.primaryTiles[0],'hvcC');
+ const rgb=hdr.metadata.channels.length===3;
+ const encoded={main:Array.from({length:geometry.primaryTiles},(_,i)=>Uint8Array.of(1,i)),
+  mainHvcc:codec,mainColr:iccColr(hdr.baseIcc),thumb:Uint8Array.of(3),thumbHvcc:codec,
+  hdrChunks:Array.from({length:geometry.hdrColumns*geometry.hdrRows},(_,i)=>Uint8Array.of(2,i)),
+  hdrHvcc:codec,hdrMetadata:hdr.metadata,hdrXmp:hdr.xmp,hdrAlternateColr:hdrJpegAlternateColr(hdr),texture:false,
+  ...(rgb?{appleHdrChunks:Array.from({length:geometry.hdrColumns*geometry.hdrRows},()=>assets.mask.payload),
+    appleHdrHvcc:assets.mask.hvcc,appleHdrHeadroom:2**hdr.metadata.alternateHeadroom}:{})};
+ const imported=buildRasterHeic(profile,encoded,null,null,geometry);
+ const template=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
+ const portrait=buildAiPortrait(imported,{payload:assets.mask.payload,hvcc:assets.mask.hvcc,width:64,height:64},template).data;
+ for(const source of [imported,portrait]){
+  const output=await executeJob({operation:'texture',data:source,opts:{preserveStyles:true}});
+  const result=output.data||source,d=discoverHeic(result),tmap=[...d.infos].find(([,i])=>i.type==='tmap')[0];
+  assert.equal(itemHidden(result,tmap),false,'HDR alternative must be selectable, not hidden');
+  const ftyp=topBox(result,'ftyp');
+  assert.ok(new TextDecoder().decode(result.subarray(ftyp.off+16,ftyp.off+ftyp.size)).includes('tmap'));
+  const inputs=d.refs.find(r=>r.type==='dimg'&&r.from===tmap).to,iso=inputs[1];
+  assert.deepEqual(inputs,[d.primary,iso]);
+  if(rgb){
+   assert.equal(auxUriForItem(d.props,iso),null);
+   assert.ok(!d.refs.some(r=>r.type==='auxl'&&r.from===iso),'RGB ISO plane is not the Apple auxiliary');
+  }else{
+   assert.equal(auxUriForItem(d.props,iso),'urn:com:apple:photo:2020:aux:hdrgainmap');
+   assert.ok(d.refs.some(r=>r.type==='auxl'&&r.from===iso&&r.to.includes(d.primary)),
+    'scalar gain may share the ISO and Apple auxiliary role');
+  }
+  assert.deepEqual(parseTmapMetadata(extractItemData(result,d,tmap)),hdr.metadata);
+  const colr=propertyBoxBytes(result,d.props,tmap,'colr'),v=new DataView(colr.buffer,colr.byteOffset,colr.byteLength);
+  assert.equal(v.getUint16(12),12,'P3 primaries');assert.equal(v.getUint16(14),8,'extended-linear HDR rendition');
+  const isoTiles=d.refs.find(r=>r.type==='dimg'&&r.from===iso).to;
+  isoTiles.forEach((id,i)=>assert.deepEqual(extractItemData(result,d,id),encoded.hdrChunks[i]));
+  if(rgb){
+   assert.notEqual(d.hdrGrid,iso);assert.equal(auxUriForItem(d.props,d.hdrGrid),'urn:com:apple:photo:2020:aux:hdrgainmap');
+   assert.deepEqual(d.refs.find(r=>r.type==='auxl'&&r.from===d.hdrGrid).to,[d.primary]);
+  }
+  assert.ok(d.stylesItem!==null&&d.linearThumb!==null&&d.deltaGrid!==null);
+ }
+ }
 });
 test('HEIC carries distinct HDR tiles, original XMP/ICC, a tmap derivation and preferred HDR alternative',()=>{
  const hdr=extractJpegHdr(jpegFixture()),profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta);
@@ -184,20 +323,27 @@ test('HEIC carries distinct HDR tiles, original XMP/ICC, a tmap derivation and p
  const main=Array.from({length:geometry.primaryTiles},(_,i)=>Uint8Array.of(1,i));
  const gain=Array.from({length:geometry.hdrColumns*geometry.hdrRows},(_,i)=>Uint8Array.of(2,i));
  const codec=propertyBoxBytes(profile.meta,pd.props,pd.primaryTiles[0],'hvcC');
+ const apple=Array.from({length:geometry.hdrColumns*geometry.hdrRows},()=>assets.mask.payload);
  const result=buildRasterHeic(profile,{main,mainHvcc:codec,mainColr:iccColr(hdr.baseIcc),thumb:Uint8Array.of(3),thumbHvcc:codec,
-  hdrChunks:gain,hdrHvcc:codec,hdrMetadata:hdr.metadata,hdrAlternateColr:iccColr(hdr.alternateIcc),hdrXmp:hdr.xmp},null,null,geometry);
+  hdrChunks:gain,hdrHvcc:codec,hdrMetadata:hdr.metadata,hdrAlternateColr:iccColr(hdr.alternateIcc),hdrXmp:hdr.xmp,
+  appleHdrChunks:apple,appleHdrHvcc:assets.mask.hvcc,appleHdrHeadroom:2**hdr.metadata.alternateHeadroom},null,null,geometry);
  const d=discoverHeic(result),tmap=[...d.infos].find(([,i])=>i.type==='tmap')[0];
  assert.deepEqual(extractItem(result,d.iloc,tmap),encodeTmapMetadata(hdr.metadata));
  assert.deepEqual(propertyBoxBytes(result,d.props,d.primary,'colr'),iccColr(hdr.baseIcc));
  assert.deepEqual(propertyBoxBytes(result,d.props,tmap,'colr'),iccColr(hdr.alternateIcc));
- assert.deepEqual(d.refs.find(r=>r.from===tmap&&r.type==='dimg').to,[d.primary,d.hdrGrid]);
+ const inputs=d.refs.find(r=>r.from===tmap&&r.type==='dimg').to,iso=inputs[1];
+ assert.deepEqual(inputs,[d.primary,iso]);assert.notEqual(d.hdrGrid,iso);
+ assert.equal(auxUriForItem(d.props,iso),null);assert.equal(auxUriForItem(d.props,d.hdrGrid),'urn:com:apple:photo:2020:aux:hdrgainmap');
+ assert.deepEqual(d.refs.find(r=>r.type==='auxl'&&r.from===d.hdrGrid).to,[d.primary]);
  assert.ok(d.refs.some(r=>r.type==='cdsc'&&r.from===d.stylesItem&&r.to.includes(tmap)));
  assert.ok(d.refs.some(r=>r.type==='cdsc'&&r.from===d.exifItem&&r.to.includes(tmap)));
  assert.ok(d.refs.some(r=>r.type==='auxl'&&r.from===d.linearThumb&&r.to.includes(tmap)));
- const tiles=d.refs.find(r=>r.from===d.hdrGrid&&r.type==='dimg').to;
+ const tiles=d.refs.find(r=>r.from===iso&&r.type==='dimg').to;
  tiles.forEach((id,i)=>assert.deepEqual(extractItem(result,d.iloc,id),gain[i]));
- const sidecar=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(d.hdrGrid)).from;
- assert.deepEqual(extractItem(result,d.iloc,sidecar),hdr.xmp);
+ const sourceSidecars=d.refs.filter(r=>r.type==='cdsc'&&r.to.includes(iso)).map(r=>extractItem(result,d.iloc,r.from));
+ assert.ok(sourceSidecars.some(x=>Buffer.from(x).equals(Buffer.from(hdr.xmp))));
+ const appleTiles=d.refs.find(r=>r.from===d.hdrGrid&&r.type==='dimg').to;
+ appleTiles.forEach((id,i)=>assert.deepEqual(extractItem(result,d.iloc,id),apple[i]));
  assert.equal(readExifOrientation(extractItem(result,d.iloc,d.exifItem)),1);
  assert.deepEqual(dimensionsForItem(d.props,tmap),[geometry.storedWidth,geometry.storedHeight]);
  assert.deepEqual([describeHeic(result).width,describeHeic(result).height],[geometry.storedWidth,geometry.storedHeight]);
@@ -211,10 +357,11 @@ test('HEIC carries distinct HDR tiles, original XMP/ICC, a tmap derivation and p
  assert.deepEqual(extractItemData(portrait,p,pt),encodeTmapMetadata(hdr.metadata));
  assert.deepEqual(propertyBoxBytes(portrait,p.props,p.primary,'colr'),iccColr(hdr.baseIcc));
  assert.deepEqual(propertyBoxBytes(portrait,p.props,pt,'colr'),iccColr(hdr.alternateIcc));
- const gainTiles=p.refs.find(r=>r.type==='dimg'&&r.from===p.hdrGrid).to;
+ const pi=p.refs.find(r=>r.type==='dimg'&&r.from===pt).to[1];
+ const gainTiles=p.refs.find(r=>r.type==='dimg'&&r.from===pi).to;
  gainTiles.forEach((id,i)=>assert.deepEqual(extractItem(portrait,p.iloc,id),gain[i]));
- const ps=p.refs.find(r=>r.type==='cdsc'&&r.to.includes(p.hdrGrid)).from;
- assert.deepEqual(extractItem(portrait,p.iloc,ps),hdr.xmp);
+ assert.equal(auxUriForItem(p.props,pi),null);assert.notEqual(p.hdrGrid,pi);
+ assert.equal(auxUriForItem(p.props,p.hdrGrid),'urn:com:apple:photo:2020:aux:hdrgainmap');
  const pg=findChild(metaChildren(portrait,topBox(portrait,'meta')),'grpl'),pa=[...boxes(portrait,pg.off+pg.hdr,pg.off+pg.size)][0];
  const pv=new DataView(portrait.buffer,portrait.byteOffset+pa.off+pa.hdr);
  assert.equal(pv.getUint32(12),pt);assert.equal(pv.getUint32(16),p.primary);

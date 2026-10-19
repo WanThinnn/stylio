@@ -187,6 +187,15 @@ export function extractJpegHdr(bytes) {
 
 export const iccColr=profile=>box('colr',concat([enc.encode('prof'),profile]));
 
+export function hdrJpegAlternateColr(hdr){
+ if(hdr?.alternateIcc)return iccColr(hdr.alternateIcc);
+ const primaries=hdr?.primaries==='smpte432'?12:hdr?.primaries==='bt709'?1:null;
+ if(!primaries)fail('Unsupported HDR rendition primaries');
+ // Historical Adobe/no-alternate-ICC files describe the derived rendition as
+ // extended-linear RGB in the source primaries.
+ return box('colr',concat([enc.encode('nclx'),be(primaries,2),be(8,2),be(0,2),Uint8Array.of(128)]));
+}
+
 export function parseTmapMetadata(bytes){
  if(!(bytes instanceof Uint8Array)||bytes.length<22)fail('Invalid tmap metadata');
  const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -234,6 +243,41 @@ export function encodedToLinear(value,transfer='srgb'){
  if(transfer==='srgb'||transfer==='iec61966-2-1')return srgbToLinear(value);
  if(transfer==='bt709'||transfer==='smpte170m')return bt709ToLinear(value);
  fail('Unsupported HDR transfer');
+}
+
+/** Convert a per-channel ISO gain map to Apple's normalized-log 0x20000
+ * auxiliary representation without collapsing RGB chromatic gain to mono. */
+export function rgbIsoToAppleGain(baseRgba,gainRgba,metadata){
+ if(!(baseRgba instanceof Uint8Array||baseRgba instanceof Uint8ClampedArray)
+   ||!(gainRgba instanceof Uint8Array||gainRgba instanceof Uint8ClampedArray)
+   ||baseRgba.length!==gainRgba.length||baseRgba.length%4
+   ||metadata?.channels?.length!==3)fail('Unsupported RGB ISO-to-Apple gain conversion');
+ const headroom=2**metadata.alternateHeadroom,stops=Math.log2(headroom),channels=metadata.channels;
+ if(!Number.isFinite(headroom)||headroom<=1||headroom>32||!Number.isFinite(stops)||stops<=0)
+  fail('Invalid Apple HDR headroom');
+ const output=new Uint8Array(baseRgba.length/4*3),clamp=value=>Math.max(0,Math.min(1,value));
+ let clippedLow=0,clippedHigh=0,unrepresentableBlack=0,sum=0,max=0;
+ for(let p=0,o=0;p<baseRgba.length;p+=4){
+  for(let c=0;c<3;c++,o++){
+   const ch=channels[c];
+   if(!ch||![ch.min,ch.max,ch.gamma,ch.baseOffset,ch.alternateOffset].every(Number.isFinite)
+     ||ch.min>ch.max||ch.gamma<=0||ch.baseOffset<0||ch.alternateOffset<0)
+    fail('Invalid RGB HDR channel metadata');
+   const base=encodedToLinear(baseRgba[p+c]/255,'srgb');
+   const scene=Math.max(0,(base+ch.baseOffset)*2**decodeGainLog(gainRgba[p+c]/255,ch)-ch.alternateOffset);
+   const multiplier=base>0?scene/base:1;
+   if(multiplier<1)clippedLow++;
+   if(multiplier>headroom)clippedHigh++;
+   if(base===0&&scene>0)unrepresentableBlack++;
+   const code=Math.round(255*clamp(Math.log2(Math.max(1,multiplier))/stops));
+   output[o]=code;
+   const rebuilt=base*2**((code/255)*stops),error=Math.abs(rebuilt-scene);
+   sum+=error;max=Math.max(max,error);
+  }
+ }
+ return {samples:output,headroom,channels:3,representation:'log2-0x20000',
+  clippedLow,clippedHigh,unrepresentableBlack,
+  meanAbsoluteSceneError:output.length?sum/output.length:0,maxAbsoluteSceneError:max};
 }
 
 /** Decode full-range JPEG YUV420 samples into encoded RGB gain-map samples. */

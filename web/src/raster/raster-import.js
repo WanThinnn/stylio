@@ -5,7 +5,7 @@ import { topBox, metaChildren, findChild, be, box, concat } from "./box.js";
 import {
   discoverHeic, discoverImageItems, parseIloc, parseIpcoIpma, extractItem, propertyForItem,
   replaceItemPropertyWithSource, compactItemProperties, repointItemProperty, removeItems, setItemReference, ispeBox, addItems,
-  propertyBoxBytes, auxUriForItem, dimensionsForItem, DEPTH_URI, MATTE_URIS,
+  propertyBoxBytes, auxUriForItem, dimensionsForItem, DEPTH_URI, MATTE_URIS, URI_HDR_GAIN,
   appendIpcoProperty, associateItemProperty, setItemPropertyAssociations,
   itemOrientation, displayDimensions,
 } from "./heif.js";
@@ -21,7 +21,8 @@ import {blackWhiteI420, measureHevcRange, hevcOutputColor} from './hevc-color.js
 import { encodeSelectedLinearThumbnail as encodeLinearThumbnail, linearGeometry } from "./linear-thumbnail.js";
 import { supportedHevcConfig } from "./hevc-encoder.js";
 import {ensureHevcEncoder, encodeHevcPixels,decodeJpegYuv} from './ffmpeg-hevc.js';
-import {extractJpegHdr,encodeTmapMetadata,iccColr,yuv420Tile,hdrJpegError,yuv420ToRgba,rebaseGainMapRgba} from './jpeg-hdr.js';
+import {extractJpegHdr,encodeTmapMetadata,iccColr,hdrJpegAlternateColr,rgbIsoToAppleGain,
+  yuv420Tile,hdrJpegError,yuv420ToRgba,rebaseGainMapRgba} from './jpeg-hdr.js';
 import {rgbaToI420} from './raster-color.js';
 import {generateSyntheticHevc} from './synthetic-hevc.js';
 import {buildStyleMarker,validateStyleRecommendation} from '../recommend/style-selection.js';
@@ -31,6 +32,18 @@ const TILE = 512, MAX_PRIMARY_TILES = 48;
 const THUMB_W = 416, THUMB_H = 312;
 
 const bytes = (s) => new TextEncoder().encode(s);
+
+function withCompatibleBrand(ftyp,brand){
+  const b=topBox(ftyp,'ftyp'),body=ftyp.subarray(b.off+b.hdr,b.off+b.size),tag=bytes(brand);
+  for(let p=8;p+4<=body.length;p+=4)if(same(body.subarray(p,p+4),tag))return ftyp;
+  return box('ftyp',concat([body,tag]));
+}
+
+function gridPayload(width,height,columns,rows){
+  if(![width,height,columns,rows].every(Number.isInteger)||width<1||height<1||width>65535||height>65535
+    ||columns<1||columns>256||rows<1||rows>256)throw Error('Invalid HDR grid payload');
+  return concat([Uint8Array.of(0,0,rows-1,columns-1),be(width,2),be(height,2)]);
+}
 
 function colorContext(canvas, options = {}) {
   // Browser HEVC encoders commonly output BT.709. Convert source ICC/P3 colours here
@@ -365,7 +378,7 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
     throw new Error("Raster import requires the 48/12 profile");
   if (encoded.main.length < 1 || encoded.main.length > 48)
     throw new Error("Raster import needs between 1 and 48 primary tiles");
-  let meta = profile.meta.slice();
+  let meta = profile.meta.slice(), ftyp = profile.ftyp;
   const payloads = new Map(profile.retained);
   let primarySlots = manifest.donor_primary_tiles.map(Number);
   let hdrSlots = manifest.donor_hdr_tiles.map(Number);
@@ -518,6 +531,17 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
   if (hdrPixi && rgbPixi && hdrPixi.index !== rgbPixi.index)
     meta = repointItemProperty(meta, hdrGrid, hdrPixi.index, rgbPixi.index);
 
+  // RGB ISO gain maps need two semantic planes. The donor HDR grid becomes
+  // the ISO tmap input; a separate Apple auxiliary is appended below.
+  if(encoded.hdrMetadata&&encoded.appleHdrChunks){
+    const current=parseIpcoIpma(meta,topBox(meta,'meta'));
+    const kept=(current.associations.get(hdrGrid)||[])
+      .filter(a=>current.properties[a.index-1]?.type!=='auxC')
+      .map(a=>[a.index,a.essential]);
+    meta=setItemPropertyAssociations(meta,hdrGrid,kept);
+    meta=setItemReference(meta,'auxl',hdrGrid,[]);
+  }
+
   const stylesId = Number(manifest.donor_styles_item);
   let styles = payloads.get(stylesId);
   if (sortedLuma) [styles] = applySceneStatistics(styles, "target", sortedLuma);
@@ -539,6 +563,7 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
     const tmap=ids.get('jpeg-hdr-tmap');
     payloads.set(tmap,encodeTmapMetadata(encoded.hdrMetadata));
     payloads.set(ids.get('jpeg-hdr-xmp'),encoded.hdrXmp);
+    ftyp=withCompatibleBrand(ftyp,'tmap');
     // Preferred HDR alternative, with the SDR primary as the compatible fallback.
     const altr=box('altr',concat([new Uint8Array(4),be(1,4),be(2,4),be(tmap,4),be(primary,4)]));
     const m=topBox(meta,'meta');
@@ -549,6 +574,32 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
     for(const ref of discoverHeic(meta).refs)
       if(['auxl','cdsc','thmb'].includes(ref.type)&&ref.to.includes(primary)&&!ref.to.includes(tmap))
         meta=setItemReference(meta,ref.type,ref.from,[...ref.to,tmap]);
+
+    if(encoded.appleHdrChunks){
+      if(encoded.appleHdrChunks.length!==hdrSlots.length||!encoded.appleHdrHvcc
+        ||!Number.isFinite(encoded.appleHdrHeadroom)||encoded.appleHdrHeadroom<=1)
+        throw Error('Apple HDR auxiliary is incomplete');
+      const appleColr=encoded.appleHdrColr||nclx(2,2,6,true);
+      const applePixi=box('pixi',new Uint8Array([0,0,0,0,3,8,8,8]));
+      let tileIds;
+      [meta,tileIds]=addItems(meta,encoded.appleHdrChunks.map((_,i)=>({
+        key:`jpeg-apple-hdr-tile-${i}`,itemType:'hvc1',
+        boxes:[ispeBox(TILE,TILE),applePixi,appleColr,encoded.appleHdrHvcc],
+      })));
+      const appleTiles=encoded.appleHdrChunks.map((_,i)=>tileIds.get(`jpeg-apple-hdr-tile-${i}`));
+      let gridIds;
+      [meta,gridIds]=addItems(meta,[{key:'jpeg-apple-hdr-grid',itemType:'grid',uri:URI_HDR_GAIN,
+        refType:'auxl',refTo:[primary],boxes:[ispeBox(geometry.hdrWidth,geometry.hdrHeight),applePixi,appleColr]}]);
+      const appleGrid=gridIds.get('jpeg-apple-hdr-grid');
+      meta=setItemReference(meta,'dimg',appleGrid,appleTiles);
+      payloads.set(appleGrid,gridPayload(geometry.hdrWidth,geometry.hdrHeight,geometry.hdrColumns,geometry.hdrRows));
+      appleTiles.forEach((id,i)=>payloads.set(id,encoded.appleHdrChunks[i]));
+      let sideIds;
+      [meta,sideIds]=addItems(meta,[{key:'jpeg-apple-hdr-xmp',itemType:'mime',
+        contentType:'application/rdf+xml',refType:'cdsc',refTo:[appleGrid]}]);
+      payloads.set(sideIds.get('jpeg-apple-hdr-xmp'),bytes(
+        `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:HDRGainMap="http://ns.apple.com/HDRGainMap/1.0/"><HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion><HDRGainMap:HDRGainMapHeadroom>${encoded.appleHdrHeadroom.toFixed(9)}</HDRGainMap:HDRGainMapHeadroom></rdf:Description></rdf:RDF></x:xmpmeta>`));
+    }
   }
 
   // A compatibility re-encode rebuilds the main/HDR graph, but Portrait depth is an
@@ -574,7 +625,7 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
     .map(([iid]) => iid).sort((a, b) => a - b);
   const missing = ids.filter((iid) => !payloads.has(iid));
   if (missing.length) throw new Error(`Profile is missing payload(s): ${missing}`);
-  let cursor = profile.ftyp.length + meta.length + 8;
+  let cursor = ftyp.length + meta.length + 8;
   const metaOut = meta.slice(), chunks = [];
   const outIloc = parseIloc(metaOut, topBox(metaOut, "meta"));
   for (const iid of ids) {
@@ -586,7 +637,7 @@ export function buildRasterHeic(profile, encoded, sortedLuma = null, faceResult 
   }
   if (cursor >= 2 ** 32) throw new Error("file too large for 32-bit offsets");
   const mdat = concat(chunks);
-  const result = concat([profile.ftyp, metaOut, box("mdat", mdat)]);
+  const result = concat([ftyp, metaOut, box("mdat", mdat)]);
   const check = discoverHeic(result);
   for (const iid of ids)
     if (!same(extractItem(result, check.iloc, iid), payloads.get(iid)))
@@ -726,6 +777,15 @@ function readManagedRgba(image,width,height,colorSpace){
   return rgba;
 }
 
+function rgbSamplesToRgba(samples){
+  if(!(samples instanceof Uint8Array)||samples.length%3)throw Error('Invalid Apple RGB gain samples');
+  const out=new Uint8ClampedArray(samples.length/3*4);
+  for(let i=0,p=0;i<samples.length;i+=3,p+=4){
+    out[p]=samples[i];out[p+1]=samples[i+1];out[p+2]=samples[i+2];out[p+3]=255;
+  }
+  return out;
+}
+
 async function encodeHdrCanvasTiles(image,geometry,color,colorSpace,onProgress,styleRecommendation=null){
   const chunks=[];let hvcc;
   const canvas=document.createElement('canvas');canvas.width=canvas.height=TILE;
@@ -833,13 +893,26 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
       gain=await encodeYuvGrid(decodedGain.bytes,decodedGain.width,decodedGain.height,
         geometry.hdrColumns,geometry.hdrRows,color,'auxiliary',onProgress);
     }
+    let appleHdr=null;
+    if(hdr.metadata.channels.length===3){
+      decodedGain??=await decodeJpegYuv(hdr.gain,{width:hdr.gainWidth,height:hdr.gainHeight,orientation},onProgress);
+      const gainRgba=rebase?.rgba??yuv420ToRgba(decodedGain.bytes,gainWidth,gainHeight);
+      const baseRgba=readManagedRgba(working,gainWidth,gainHeight,colorSpace);
+      const converted=rgbIsoToAppleGain(baseRgba,gainRgba,hdr.metadata);
+      const appleColor={primaries:'unspecified',transfer:'unspecified',matrix:'smpte170m',fullRange:true};
+      const appleYuv=rgbaToI420(rgbSamplesToRgba(converted.samples),gainWidth,gainHeight,appleColor);
+      const encodedApple=await encodeYuvGrid(appleYuv,gainWidth,gainHeight,
+        geometry.hdrColumns,geometry.hdrRows,appleColor,'appleHdr',onProgress);
+      appleHdr={chunks:encodedApple.chunks,hvcc:encodedApple.hvcc,
+        headroom:converted.headroom,colr:nclx(2,2,6,true)};
+    }
     const data=buildRasterHeic(profile,{main:main.chunks,mainHvcc:main.hvcc,
       mainColr:hdr.baseIcc?iccColr(hdr.baseIcc):rasterColr(color),
       thumb:thumb.chunks[0],thumbHvcc:thumb.hvcc,thumbColr:thumb.colr,linearThumbnail,
       hdrChunks:gain.chunks,hdrHvcc:gain.hvcc,hdrColr:rasterColr(color),
-      // Adobe gain maps have no alternate rendition ICC: the HDR result uses
-      // the base primaries in extended linear RGB, not the gain image's profile.
-      hdrMetadata:hdr.metadata,hdrXmp:hdr.xmp,hdrAlternateColr:hdr.alternateIcc?iccColr(hdr.alternateIcc):nclx(hdr.primaries==='smpte432'?12:1,8,0,true),sourceExif,
+      hdrMetadata:hdr.metadata,hdrXmp:hdr.xmp,hdrAlternateColr:hdrJpegAlternateColr(hdr),sourceExif,
+      ...(appleHdr?{appleHdrChunks:appleHdr.chunks,appleHdrHvcc:appleHdr.hvcc,
+        appleHdrHeadroom:appleHdr.headroom,appleHdrColr:appleHdr.colr}:{}),
       lightMaps:analyze?buildLightMaps(sampleRasterLuma(working,32,32)):null,
     },analyze?Array.from(sampleRasterLuma(working)).sort((a,b)=>a-b):null,null,geometry);
     const result={data,geometry,hdr:true,detailApplied:Boolean(enhanced&&rebase),detailSkipped,styleDisplayRendered,

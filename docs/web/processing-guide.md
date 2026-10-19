@@ -761,3 +761,156 @@ These tests do not validate Apple Photos Styles/Portrait controls or all cameras
 PNG input remains supported through the raster converter. HEIC output has no
 transparent alpha plane; this is a still-photo conversion, not a lossless PNG
 container round trip.
+
+### Third-party HDR JPEGs (Indigo / Adobe gain maps)
+
+The dedicated HDR JPEG importer preserves the base ICC and the source gain
+map's scalar or RGB bounds, gamma, offsets and headroom in an ISO tmap graph.
+The HEIC advertises tmap and prefers the HDR rendition over its SDR fallback.
+An existing alternate ICC is retained; Adobe inputs without one declare PQ in
+the source primaries. The generated template's Apple legacy gain-map role is
+removed, and Texture / Portrait stages must not restore it. The native-camera
+HDR reconstruction route remains separate.
+
+The supplied Indigo capture passes real browser decode/encode and exact
+primary/gain payload comparison with the earlier output. Device confirmation
+of HDR in both the Photos viewer and editor remains required; graph presence
+alone does not establish visible HDR or support for every camera app.
+
+Device update: the user rejected both initial Indigo A/B outputs because HDR
+is still absent. This remains an open bug. The generated HDR alternative was
+also found to be marked hidden; new tmap items are now visible while codec
+tiles/auxiliaries remain hidden. Portrait B already had a visible tmap, so that
+flag alone cannot explain both failures. Standalone HDR versus Styles controls
+and a one-byte visibility-only control were created for physical-device comparison.
+
+Latest device correction: E (HDR `tmap` selected as primary, Styles retained)
+shows HDR in the Photos viewer but loses HDR after Photos Edit → Save; F (only
+the tmap hidden flag cleared) does not show HDR. E therefore isolates a separate
+Photos editor compatibility problem. The experimental `importedIso` path in
+`registerTmapHdr` can add a legacy Apple gain auxiliary association and optional
+HDR headroom XMP to an HDR-primary Adobe import, retaining every existing image
+item's bytes. `tools/repair-imported-hdr-editor.mjs` enables controlled A/B
+validation without activating this route in production. The repair remains
+unconfirmed on an iPhone; do not treat a passing container regression as proof
+that Edit → Save preserves HDR. Do not alter E's decoded pixels or colour space.
+
+Device result for that repair: I/J briefly flash HDR for roughly 0.3 s, then Photos
+settles to SDR; Edit and post-save remain SDR. Therefore an RGB ISO gain plane
+must not simply be relabelled as Apple's legacy HDR auxiliary. The current bounded
+diagnostic keeps the RGB ISO tmap intact and adds a separate scalar Apple fallback
+computed from the source per-channel HDR equation. K links that fallback to the
+tmap primary; L links it to both SDR base and tmap. These dual-plane files are
+rejected on-device and must not be promoted.
+
+The production fix is based on the previously device-confirmed CQ editor topology,
+not on K/L. CQ keeps the SDR image grid as `pitm`, keeps HDR as a non-primary
+`tmap` alternative, and links the Apple HDR auxiliary only to the SDR primary.
+For third-party RGB ISO/Adobe HDR the app now preserves the original RGB gain
+plane as the second `tmap` input and generates a separate monochrome Apple gain
+plane for Photos Edit. The Apple plane receives `auxC` HDR, `auxl -> SDR primary`
+and source-derived `HDRGainMapHeadroom`; it is never added to the tmap's `dimg`
+recipe. Styles/Exif/thumbnail/linear resources continue to describe SDR + tmap.
+
+`Indigo_M_CQTopology_AppPipeline.HEIC` is produced by the real `importRaster()`
+plus FFmpeg.wasm path with AI Detail disabled. Its audited graph is SDR
+`primary=1`, ISO `tmap 98 -> [1,50]`, separate Apple HDR grid `100`, and
+`auxl 100 -> [1]`. Targeted RGB/scalar/Texture/Portrait regressions pass 24/24.
+Physical validation confirms M preserves HDR and Styles/Texture through Photos,
+including Edit/Save. Its remaining issue is colour fidelity: the Apple fallback is
+one-channel scalar while the Indigo source gain map is RGB, so Photos preserves the
+base chromaticity instead of the source HDR per-channel chromaticity. A bounded
+source analysis measures scalar HDR RGB MAE around 0.02746 linear and mean saturation
+at about 97.65% of the source HDR value, with larger regional errors.
+
+Candidate N keeps the exact proven M/CQ graph and changes only the Apple auxiliary
+from mono to RGB per-channel Apple-equation gain. The original SDR primary, ISO RGB
+`tmap`, Styles, Exif, linear thumbnail and all other item payloads remain unchanged.
+Full-resolution equation error drops to about 0.000718 mean absolute scene error.
+Device testing confirms the RGB auxiliary fixes the visible colour loss. O then fixes
+the 0x20000 auxiliary sample representation, but HDR brightness still remains about
+10% below the source, so the residual viewer difference is not the editor auxiliary.
+
+Historical IDG fixtures expose the viewer regression. The retained
+Adobe/no-alternate-ICC `IDG_20261009_HDR_Fixed.HEIC` declares its tmap derived
+rendition as full-range Display-P3 extended-linear `nclx(12,8,0)`. Section 10.139
+changed this path to PQ `nclx(12,16,0)`. Candidate P restores only that transfer,
+and physical testing confirms viewer HDR brightness and colour return to the desired
+source-like appearance. P still changes appearance in Photos Edit: colour washes out
+and bright lamp highlights clip, so viewer and editor are not yet one coherent HDR state.
+
+Candidate Q attempted the editor correction in the real HDR JPEG importer, but it changed
+multiple variables together: HDR-aware linear thumbnail, mono Apple fallback declaration
+65536, and the already-proven P viewer tmap. Physical testing rejects Q because HDR is lost
+entirely. Those Q-specific runtime changes are rolled back; do not use Q as a production
+baseline.
+
+Candidate R therefore isolates one variable only. It is built from device-proven P and
+replaces only linear-thumbnail item 65 with the HDR-aware Main10 resource. Every other item
+payload, graph reference and non-linear property is verified byte-exact to P, including the
+P3 extended-linear tmap, RGB ISO gain, RGB Apple auxiliary/version 131072, headroom and
+Styles/Texture resources. Device testing confirms R keeps the correct P viewer but does not
+change the Edit defect: colour is still slightly washed out and lamp highlights clip harder.
+LinearThumb is therefore not the primary remaining cause.
+
+The next isolated layer is the Apple editor auxiliary. CQ's accepted auxiliary is mono 8-bit,
+uses a generic Linear Gray ICC on the grid/tiles, has no tile pixi, and carries full-range
+2/2/2 HEVC VUI. P/R instead expose a three-channel RGB Apple auxiliary with colour-image
+metadata. Candidate S keeps P's entire viewer/tmap/Styles/linearThumb graph exact and changes
+only the Apple auxiliary to a source-derived mono normalized-log 0x20000 representation with
+CQ-shaped Linear Gray/mono codec properties. Version 131072 and source headroom remain exact.
+Device validation of S shows View, Preview and Edit are now consistent, but HDR-only colour
+remains slightly desaturated versus the original JPEG, especially green foliage. Low Power
+Mode disables HDR and makes the Stylio HEIC and original JPEG colour match 100%, proving the
+remaining error is in HDR gain reconstruction rather than SDR pixels/profile/conversion.
+A bounded source-equation check confirms mono gain retains only about 63.8% of source HDR
+saturation on green-dominant pixels even though green-channel luminance remains about 95.9%.
+Do not correct this with a global saturation boost.
+
+Candidate T isolates a topology solution: keep S's pitm and native-shaped mono Apple editor
+gain untouched, add one duplicate SDR grid that reuses the exact same primary payload/properties
+and 48 tiles, and make the RGB ISO tmap derive from that duplicate instead of the editor pitm.
+No image pixel is re-encoded. Device validation shows T remains visually the same as S: HDR green
+is still slightly desaturated while SDR Low Power Mode matches the source. Splitting the tmap base
+alone is therefore insufficient.
+
+Candidate U changes only alternate-group membership from `[tmap, editor primary]` to `[tmap,
+display-base duplicate]`. All item payloads, properties and iref relationships stay exact to T.
+The editor `pitm` and mono Apple auxiliary are now completely outside the viewing alternate group.
+Device validation shows U is unchanged from S/T, confirming Photos prefers the Apple HDR auxiliary
+independently of this alternate-group topology. Stop further topology-only experiments that keep a
+separate mono Apple gain.
+
+The next bounded candidate returns to the retained 20261009 structural IDG contract.
+`IDG_20261009_HDR_Fixed.HEIC` uses the same RGB ISO gain grid as both the tmap input and Apple HDR
+auxiliary, with auxl targets `[primary,tmap]` and the original Adobe hdrgm RDF sidecar on that gain.
+Candidate V restores those roles on current source bytes; W additionally removes only the `tmap`
+compatible brand to match that retained file's ftyp. Later review corrects an important assumption:
+the 20261009 Adobe/no-alternate-ICC conversion was never documented as physically accepted on an
+iPhone; its original record left the device appearance check pending. Only the older 20251020
+conversion has explicit historical device acceptance, so 20261009 is a structural reference only.
+
+A clean export from the current HEAD contract was then tested on the iPhone and lost HDR entirely,
+despite preserving the source gain plane byte-for-byte at the checked 512x512 YUV tile. Therefore
+HEAD and the shared-role 20261009 shape are not valid production fallbacks for this source.
+
+Candidate X is the temporary accepted compatibility point. It starts from P, whose P3
+extended-linear `tmap` gives the correct viewer rendition, and leaves every P payload, graph
+reference and hvcC byte exact. Only the separate RGB Apple HDR auxiliary's container colour
+declaration changes from `nclx(12,13,6)` to full-range `nclx(2,2,6)`, matching the HEVC SPS that
+already signalled 2/2/6. Physical validation reports a small residual visual offset, but the result
+is acceptable for the current release.
+
+Production implements the same semantics directly. Three-channel Adobe/Indigo inputs keep their
+source RGB ISO gain as the second `tmap` input with no Apple aux role, while a separate per-channel
+normalized-log 0x20000 Apple auxiliary targets only the SDR primary. It carries version 131072,
+the exact source headroom, and full-range 2/2/6 data signalling. The tmap remains extended-linear
+in source primaries, the HEIF advertises the `tmap` compatible brand, and generated tmap items are
+visible while auxiliary/metadata items remain hidden. No HDR stripping or arbitrary brightness /
+saturation compensation is used.
+
+The real browser pipeline smoke for the current Indigo fixture passes with primary 1, ISO gain 50,
+tmap 98, Apple grid 112 with 12 tiles, source headroom 10.312498469, and Styles item 97. Contract
+audit confirms `tmap 98 -> [1,50]`, tmap `nclx(12,8,0,true)`, ISO gain
+`nclx(12,13,6,true)`, Apple `auxl 112 -> [1]`, XMP version 131072, and matching container/SPS
+`nclx(2,2,6,true)` on all Apple tiles. Focused HDR regression tests pass 26/26.

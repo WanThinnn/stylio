@@ -1,0 +1,2 @@
+import fs from 'node:fs/promises';import {discoverHeic} from '../web/src/core/heif.js';
+for(const f of process.argv.slice(2)){const b=new Uint8Array(await fs.readFile(f)),d=discoverHeic(b);console.log(f,{propertyCount:d.props.properties.length,ipmaFlags:d.props.flags,version:d.props.version,linear:d.linearThumb,linearAssociations:d.props.associations.get(d.linearThumb)});}
