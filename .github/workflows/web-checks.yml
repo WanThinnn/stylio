@@ -18,6 +18,8 @@ jobs:
       - run: node tools/package-ai-style-models.mjs assemble
       - run: node tests/web/check-i18n.mjs
       - run: node tests/web/check-pwa.mjs
+      - name: Check Portrait source decoding and retry lifecycle
+        run: node --test tests/web/ai-portrait-source.mjs tests/web/portrait-controller.mjs
       - name: Check edited native Styles and original-photo preservation
         run: node --test tests/web/native-export-texture.mjs tests/web/native-rebuild-hdr.mjs tests/web/native-style-rebuild.mjs tests/web/hdr-linear-thumbnail.mjs tests/web/heic-grid-sample.mjs
       - run: node --test tests/web/application.mjs tests/web/app-shell.mjs tests/web/stylesheets.mjs

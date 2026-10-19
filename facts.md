@@ -5569,3 +5569,61 @@ The strongest device evidence remains P/S. Candidate P restores source-like HDR 
 Production now implements the X semantics rather than shipping only the research fixture. For a three-channel Adobe/Indigo gain map, the source RGB ISO plane remains untouched as the second `tmap` input and carries no Apple auxiliary role. A separate RGB Apple auxiliary is derived per channel with the normalized-log `0x20000` equation, signalled as full-range `nclx(2,2,6)`, carries `HDRGainMapVersion=131072` and the exact source headroom, and targets only the SDR primary. The tmap stays extended-linear in source primaries; the file advertises the `tmap` compatible brand; generated tmap items are visible while ordinary auxiliary/metadata items remain hidden. No arbitrary HDR brightness/saturation boost and no HDR stripping are used.
 
 The real browser/app smoke on `tests/private-fixtures/indigo-hdr/input.jpg` passes with no AI Detail: 3024x4032 primary, ISO gain 50, separate Apple HDR grid 112 with 12 tiles, source headroom 3.366322 stops / 10.312498469 linear, Styles item 97, and exact three-channel source tmap metadata. `Indigo_Production_X.HEIC` is 9,410,820 bytes, SHA-256 `051555b6b850cd603f37620e6eb4bbf158f3fcfc401a25db84fc5e15a36a64ce`. Contract audit confirms `tmap 98 -> [1,50]`, tmap `nclx(12,8,0,true)`, ISO gain `nclx(12,13,6,true)`, Apple aux `112 -> [1]`, Apple XMP version 131072/headroom 10.312498469, and container/SPS `nclx(2,2,6,true)` on all 12 Apple tiles. Focused regression tests pass 26/26. The production smoke is contract-equivalent to the device-accepted X path but is a fresh app-generated encode, so the remaining very small HDR colour offset is explicitly accepted as a temporary limitation rather than claimed as pixel-identical to the source.
+
+## 10.144 — Missing Indigo Portrait depth and legacy-branch regression audit (2026-10-20)
+
+The supplied IMG_1995.HEIC is a Styles/Texture output with no depth auxiliary at
+all. Source is IDG_20261019_165207_144.JPEG (3024x4032, Adobe RGB HDR, headroom
+0.107217 stops). Existing buildAiPortrait succeeds on IMG_1995 when provided a
+valid depth sample, so the missing controls are not initially a Photos-only
+recognition issue.
+
+A real browser reproduction runs createAiPortrait against IMG_1995 with the
+original JPEG as source. Normal Chrome ImageBitmap decoding succeeds. Forcing
+only JPEG ImageBitmap rejection reproduces `AI primary photo decode failed`:
+aiSourceCanvas passes the original JPEG to libheif instead of using the browser's
+HTML image decoder. The optional Portrait controller then publishes the normal
+Styles-only fallback. This failure path predates the compatibility branch:
+ai-portrait-source.js is unchanged since commit 4d3f742 (2026-10-10), and is
+byte-identical at branch base 9e3172e. No iPhone error log was supplied, so this
+is a reproduced mechanism consistent with the missing-depth file, not proof
+that every possible failure of that file has the same cause.
+
+Local fix: after ImageBitmap rejection, sniff the original file bytes and use
+HTMLImageElement.decode for raster sources. Never send failed JPEG/PNG/WebP
+decodes into libheif; AVIF may retain its HEIF fallback. Native HEIC retains its
+existing decoder path. Object URLs, canvases and native decoder handles are
+released on both success and failure. New regression was observed failing
+before the fix and passing afterward; it also checks error cleanup and the
+unchanged HEIC fallback.
+
+The real Portrait controller + Lite ONNX/WebGPU + FFmpeg + assembly now succeeds
+with the same forced ImageBitmap rejection on the supplied source. The private
+Indigo_Portrait_HDR_Fixed.HEIC output is 11,183,598 bytes and contains depth
+768x1024, a depth descriptor and focus/aperture metadata attached to SDR and HDR.
+Independent role-by-role audit confirms exact source primary pixels, both ISO
+RGB and Apple RGB gain payloads, HDR metadata/profile/codec properties, Styles,
+Texture, linear/ordinary thumbnails and selected style controls. This validates
+the file contract, not physical Photos recognition of Lighting/Depth yet.
+
+The user also requests an audit of feature/legacy-compatibility-export. Review
+range 9e3172e...fe1cce1 is checked against current 818674e and the local design/
+validation specs. JPEG imports return from the raster branch before the HEIC
+compatibility classifier; known HEICs retain their existing AI call. First-pass
+unknown-contract recovery intentionally freezes output before Soft Skin/AI,
+as required by the design. Read-only classification of 411 private HEICs has
+no parser/fingerprint failure; 20 unknowns are modified research contracts.
+No previously stable original was demonstrated misrouted by this branch.
+
+One independent P2 branch regression is confirmed: edc1ef25 adds a pending save
+lock when Portrait is enabled after conversion, but runAiCandidate never ends
+that queue lock. Failure, cancellation and success with preview disabled leave
+save controls locked. Three real-controller lifecycle tests fail before the
+fix and pass after adding the finally reset; an active preview write remains
+locked correctly. See docs/web/2026-10-20-legacy-compatibility-regression-review.md
+for the separate Standards/Spec reports. No bulk rollback was performed.
+
+Validation: 322 passed, 17 absent optional private fixtures skipped, zero failed;
+PWA, language and whitespace checks pass. Both new regression files are required
+in browser CI and Pages checks. Cache is v231. Changes remain local on master;
+personal photos and LAN artifacts are excluded. No push/deploy in this turn.

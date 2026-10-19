@@ -79,6 +79,10 @@ export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcce
       // Publish the normal fallback only after AI failed/cancelled. Never expose
       // it between Styles processing and the requested Portrait result.
       if(!candidate.aiFile||!aiFeatures.enabled('portrait'))ui.output(candidate.outputFile);
+      // Re-enabling Portrait queues this row with its save controls locked.
+      // End that lock for success, failure and cancellation; only a real
+      // outstanding preview settings write should keep the result pending.
+      ui.outputPending?.(Boolean(candidate.aiFile&&aiFeatures.enabled('portrait')&&ui.portraitPending));
       ui.progress?.(100);ui.aiBusy(false);
     }
   }

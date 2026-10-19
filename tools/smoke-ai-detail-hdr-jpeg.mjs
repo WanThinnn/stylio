@@ -3,6 +3,9 @@
  * Uses the real local ONNX/WebGPU and FFmpeg.wasm path.
  *
  * node tools/smoke-ai-detail-hdr-jpeg.mjs [input] [--model=lite|standard|pro] [--no-detail] [--save=tests/private-fixtures/...HEIC]
+ * --portrait-input=<Styles.heic> runs the actual Portrait controller on an
+ * existing export, using input JPEG as its original source. --bitmap-fallback
+ * exercises browsers whose ImageBitmap decoder rejects that JPEG.
  */
 import {createServer} from 'node:http';
 import {readFile,mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
@@ -16,6 +19,8 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const input=process.argv.find(arg=>/\.(jpe?g)$/i.test(arg))||'tests/private-fixtures/HDR_Input/IDG_20251020_121945_809.JPEG';
 const model=process.argv.find(arg=>arg.startsWith('--model='))?.slice(8)||'lite';
 const detail=!process.argv.includes('--no-detail');
+const portraitInput=process.argv.find(arg=>arg.startsWith('--portrait-input='))?.slice(17)||null;
+const bitmapFallback=process.argv.includes('--bitmap-fallback');
 if(!['lite','standard','pro'].includes(model))throw Error('Invalid --model');
 const saveArg=process.argv.find(arg=>arg.startsWith('--save='))?.slice(7)||null;
 const saveFull=saveArg?resolve(root,saveArg):null;
@@ -75,7 +80,10 @@ try{
  await new Promise((ok,no)=>{socket.addEventListener('open',ok,{once:true});socket.addEventListener('error',no,{once:true});});
  let seq=0;const pending=new Map();
  socket.addEventListener('message',e=>{
-  const m=JSON.parse(String(e.data));if(!m.id)return;const c=pending.get(m.id);if(!c)return;
+  const m=JSON.parse(String(e.data));
+  if(m.method==='Runtime.consoleAPICalled'&&m.params.args?.[0]?.value==='[portrait-smoke]')
+   console.log(m.params.args.slice(1).map(a=>a.value).join(' '));
+  if(!m.id)return;const c=pending.get(m.id);if(!c)return;
   pending.delete(m.id);clearTimeout(c.timer);m.error?c.reject(Error(JSON.stringify(m.error))):c.resolve(m.result);
  });
  const cdp=(method,params={},timeout=1200000)=>new Promise((ok,no)=>{
@@ -84,7 +92,7 @@ try{
  });
  await cdp('Runtime.enable');await cdp('Page.enable');await sleep(1000);
  const base='http://127.0.0.1:'+port;
- const cfg={base,input,model,detail,save:Boolean(saveFull)};
+ const cfg={base,input,model,detail,portraitInput,bitmapFallback,save:Boolean(saveFull)};
  const expression='(async cfg=>{'+
    "const [{importRaster},{discoverHeic,extractItemData},{parseTmapMetadata}]=await Promise.all(["+
    "import(cfg.base+'/web/src/raster/raster-import.js'),"+
@@ -93,11 +101,22 @@ try{
    "const source=new Uint8Array(await fetch(cfg.base+'/'+cfg.input).then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer();}));"+
    "const events=[],started=performance.now();"+
    "const name=cfg.input.split('/').at(-1);"+
-   "const result=await importRaster(new File([source],name,{type:'image/jpeg'}),null,"+
+   "const sourceFile=new File([source],name,{type:'image/jpeg'});"+
+   "const result=cfg.portraitInput?{hdr:true,data:new Uint8Array(await fetch(cfg.base+'/'+cfg.portraitInput).then(r=>r.arrayBuffer()))}:await importRaster(sourceFile,null,"+
    "progress=>{if(progress.stage&&(!events.length||events.at(-1)!==progress.stage))events.push(progress.stage);},"+
    "{analyze:true,detail:cfg.detail?{modelId:cfg.model,provider:'webgpu'}:null});"+
    "if(!result.hdr)throw Error('Result is not HDR');"+
    "if(cfg.detail&&!result.detailApplied)throw Error('AI detail was not applied: '+String(result.detailSkipped||'unknown'));"+
+   "if(cfg.portraitInput){"+
+   "if(cfg.bitmapFallback){const bitmap=globalThis.createImageBitmap;globalThis.createImageBitmap=(b,...args)=>b.type==='image/jpeg'?Promise.reject(Error('JPEG ImageBitmap unavailable')):bitmap(b,...args);}"+
+   "const {createPortraitController}=await import(cfg.base+'/web/src/app/processing/portrait-controller.js');"+
+   "const candidates=[],cleanup=[],notes=[];let published,stage;"+
+   "const ui={progress(){},aiState(next){if(stage!==next){stage=next;console.info('[portrait-smoke]',next);}},note(message){if(message)notes.push(message);},aiBusy(){},cancelAi(){return()=>{};},cleanup(fn){cleanup.push(fn);},output(file){published=file;},async portraitPreview(){},aiView(){}};"+
+   "const controller=createPortraitController({aiFeatures:{enabled:id=>id==='portrait'},aiCandidates:candidates,aiText:()=>new Proxy({},{get:(_,k)=>String(k)}),gpuAcceleration:{checked:true},selectedAiLevel:()=>cfg.model});"+
+   "await controller.tryAiPortrait(null,new File([result.data],'styles.HEIC',{type:'image/heic'}),ui,name,sourceFile);"+
+   "if(candidates[0]?.state!=='done')throw Error('Portrait controller failed: '+JSON.stringify(notes));"+
+   "result.data=new Uint8Array(await published.arrayBuffer());cleanup.forEach(fn=>fn());"+
+   "const graph=discoverHeic(result.data);if(![...graph.infos].some(([id])=>graph.props.associations.get(id)?.some(a=>graph.props.properties[a.index-1].auxUri==='urn:mpeg:hevc:2015:auxid:2')))throw Error('Portrait output has no depth auxiliary');}"+
    "const d=discoverHeic(result.data);"+
    "if(d.hdrGrid===null||!d.hdrTiles.length)throw Error('Output HDR gain map missing');"+
    "if(d.stylesItem===null)throw Error('Generated Styles item missing');"+
