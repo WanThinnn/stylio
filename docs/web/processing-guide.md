@@ -913,4 +913,8 @@ The real browser pipeline smoke for the current Indigo fixture passes with prima
 tmap 98, Apple grid 112 with 12 tiles, source headroom 10.312498469, and Styles item 97. Contract
 audit confirms `tmap 98 -> [1,50]`, tmap `nclx(12,8,0,true)`, ISO gain
 `nclx(12,13,6,true)`, Apple `auxl 112 -> [1]`, XMP version 131072, and matching container/SPS
-`nclx(2,2,6,true)` on all Apple tiles. Focused HDR regression tests pass 26/26.
+`nclx(2,2,6,true)` on all Apple tiles. The smoke output is `Indigo_Production_X.HEIC`
+(9,410,820 bytes, SHA-256 `051555b6b850cd603f37620e6eb4bbf158f3fcfc401a25db84fc5e15a36a64ce`).
+Focused HDR regression tests pass 26/26. This production encode is contract-equivalent to the
+device-accepted X candidate; the small remaining HDR colour offset is a known temporary limitation,
+not something to hide with a global saturation/brightness correction.
