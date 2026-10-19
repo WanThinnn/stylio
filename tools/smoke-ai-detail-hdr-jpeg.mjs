@@ -6,6 +6,8 @@
  * --portrait-input=<Styles.heic> runs the actual Portrait controller on an
  * existing export, using input JPEG as its original source. --bitmap-fallback
  * exercises browsers whose ImageBitmap decoder rejects that JPEG.
+ * --source-root=<snapshot-root> serves web/src from an isolated historical
+ * snapshot while keeping large runtime assets and private inputs local.
  */
 import {createServer} from 'node:http';
 import {readFile,mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
@@ -16,6 +18,8 @@ import {join,resolve,relative,extname,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
+const sourceRootArg=process.argv.find(arg=>arg.startsWith('--source-root='))?.slice(14)||null;
+const sourceRoot=sourceRootArg?resolve(root,sourceRootArg):null;
 const input=process.argv.find(arg=>/\.(jpe?g)$/i.test(arg))||'tests/private-fixtures/HDR_Input/IDG_20251020_121945_809.JPEG';
 const model=process.argv.find(arg=>arg.startsWith('--model='))?.slice(8)||'lite';
 const detail=!process.argv.includes('--no-detail');
@@ -47,7 +51,8 @@ const server=createServer(async(req,res)=>{
   res.writeHead(200,{...headers,'Content-Type':'text/plain'});res.end(String(total));return;
  }
  if(path==='/__smoke__'){res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end('<title>HDR JPEG Detail Smoke</title>');return;}
- const full=resolve(root,'.'+path),rel=relative(root,full);
+ const servingRoot=sourceRoot&&path.startsWith('/web/src/')?sourceRoot:root;
+ const full=resolve(servingRoot,'.'+path),rel=relative(servingRoot,full);
  if(rel.startsWith('..')||rel.startsWith(sep)||rel===''){res.writeHead(404,headers);res.end();return;}
  try{const data=await readFile(full);res.writeHead(200,{...headers,'Content-Type':mime[extname(full).toLowerCase()]||'application/octet-stream'});res.end(data);}
  catch{res.writeHead(404,headers);res.end();}

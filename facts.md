@@ -5627,3 +5627,339 @@ Validation: 322 passed, 17 absent optional private fixtures skipped, zero failed
 PWA, language and whitespace checks pass. Both new regression files are required
 in browser CI and Pages checks. Cache is v231. Changes remain local on master;
 personal photos and LAN artifacts are excluded. No push/deploy in this turn.
+
+## 10.145 — Indigo HDR survives View/Edit but disappears on Photos zoom (2026-10-20)
+
+Device feedback accepts Indigo_Portrait_HDR_Fixed.HEIC for Portrait controls,
+Styles/Texture, and HDR in View/Edit. Zoom makes HDR disappear until the image
+is closed and reopened, without restarting Photos. The original Indigo JPEG
+keeps HDR on the same zoom test. Do not mark zoom compatibility as fixed, and
+do not dismiss this as normal behaviour affecting every HDR photo.
+
+Supplied IMG_1998.HEIC is 1,172,790 bytes, SHA256
+c68ff55b0b5f6c39a54d1fc6c0188aaa5cc30666ad8a24e4c65dff1ee041aaed.
+Its graph has primary 49 (3024x4032, 48 tiles), Apple HDR grid 64
+(1512x2016, 12 tiles), version 131072 and headroom 8. It has no tmap,
+Styles, Texture or depth auxiliary and appears to be a rendered Photos export,
+not the original 11,183,598-byte editable Stylio container. This does not
+contradict device acceptance of the editable asset: rendered export resources
+and the asset's nondestructive edit resources must not be conflated. The file
+still contains HDR; transient display loss does not establish deleted gain data.
+
+Historical comparison 9e3172e...fe1cce1 is byte-identical for raster-import.js,
+jpeg-hdr.js, ai-portrait-export.js, ai-portrait-source.js and
+hdr-compatibility.js. The shared HEIF reader change only adds TIFF scalar
+sizes. The separate RGB Apple gain representation was introduced later by
+1285101. This narrows investigation, but does not prove the commit causing
+the physical zoom issue. No legacy rollback or speculative production change.
+
+Three ranked diagnostic paths are viewer ISO/Apple rendition handoff, tiled
+RGB Apple gain decoding, and a Photos-generated rendition/cache. Windows
+cannot run the physical Photos zoom UI; the user's original-vs-export device
+comparison supplies the failing feedback loop. tools/indigo-zoom-hdr-candidates.mjs
+creates a frozen new output directory, refuses overwrites, and verifies each
+candidate with the actual read worker. Private batch:
+tests/private-fixtures/indigo-zoom-1998-v2/
+
+- Zoom_A_Photos_Render.HEIC: byte-exact IMG_1998 imported as a fresh asset;
+  HDR-only diagnostic, no editable Styles/depth expected in this rendered copy.
+- Zoom_B_Primary_HDR.HEIC: remove only the altr preference group from accepted
+  Portrait export; all payloads, properties and iref references stay exact.
+  SHA256 11f3cfd1687108a2acc64cd3b25561c9e4e3a4c7dc5731295ebc520e4018c1b2.
+- Zoom_C_Single_RGB_Gain.HEIC: replace only the Apple gain's tiled layout with
+  one lossless 1512x2016 HEVC RGB-data image; keep original ISO HDR, primary,
+  Styles, Texture, depth, colour equations and headroom. All original payloads
+  stay exact; full-range Y/U/V samples compare exactly before and after the
+  new encode and after assembly. SHA256
+  0c53b9e9c0da29ed61b751ce4aef2e98aede6bff36da691460cfc1aeb4bcc075.
+
+The gain-sample diagnostic must explicitly preserve full range at FFmpeg input
+and output; default raw yuv420p conversion can rescale samples. Sample asserts
+compare buffers without formatting millions of values on a mismatch. An early
+diagnostic attempt lacked this range declaration and was rejected, never served.
+B/C still require physical zoom plus View/Edit/Save/control checks. Actual
+worker reads, payload/property/reference assertions and gain round-trip checks
+pass; syntax and diff whitespace checks pass. No new production fix is claimed.
+
+## 10.146 — Replace the weak-HDR zoom scene with a confirmed HDR Indigo capture (2026-10-20)
+
+Device feedback: A still has the zoom issue. B/C have no visibly useful HDR in
+the old capture; the user explains that scene was not an HDR capture in practice.
+Its metadata headroom was only 0.107217 stops (1.077148381 linear). Do not treat
+the old B/C as proof that either diagnostic change strips HDR, or use that weak
+scene to judge the next zoom fix. The old A re-import still reproduces the issue.
+
+New user input C:/Users/WanThinnn/Downloads/IDG_20261019_201808_176.JPEG is
+2,737,932 bytes, SHA256
+259381ce6efddeea6c716f53fe9b85fa2c2ab43ac4ccfa751959aaf06e087f2a.
+Base is 4032x3024, RGB gain is 2016x1512, Display P3, Adobe three-channel HDR,
+alternateHeadroom 3.257388 stops / 9.562501043 linear. A bounded 256x192
+source-equation diagnostic confirms actual highlights rather than metadata
+alone: estimated peak luminance 6.067x SDR white, peak channel 8.646,
+2.952% of sampled luminance above SDR white and 1.225% above 2x.
+These are source reconstruction estimates, not measured iPhone display output.
+
+Ran the actual browser importRaster + FFmpeg path with AI Detail disabled,
+then the actual Portrait controller + Lite ONNX/WebGPU + assembly on that
+same file. Styles_Baseline.HEIC is 11,412,831 bytes; Portrait_Baseline.HEIC
+is 11,596,958 bytes, depth 1024x768. Source ISO metadata is exact, Apple
+headroom is 9.562501043 and editable Styles remain present. No scene/template
+HDR, exposure/saturation boost or new production policy was introduced.
+
+tools/indigo-zoom-hdr-candidates.mjs now accepts '-' instead of a Photos render
+to create a fresh exact app baseline D plus E/F on the same scene. Frozen batch
+tests/private-fixtures/indigo-zoom-201808/zoom/:
+
+- D Zoom_D_App_Baseline.HEIC (11,596,958 bytes), SHA256
+  9ed2a54cb8faaa1d19f4db26f659df5b0d61f91844ad34c4a7652e9823297b8f.
+- E Zoom_E_Primary_HDR.HEIC (11,596,922 bytes): only remove altr preference,
+  every payload/property/reference exact. SHA256
+  5294026231e97b4fb22a7e109807bbebc016ccb6701d9951c12044e71438250a.
+- F Zoom_F_Single_RGB_Gain.HEIC (14,129,112 bytes): exact Apple RGB gain
+  decoded values in one 2016x1512 lossless HEVC item instead of 12 tiles,
+  all existing payloads preserved. SHA256
+  23b265090af6fae87079c01bf68fe4383e003ffa04cb658df7ef0dd5b9759893.
+
+Actual worker reads, sample round trips and protected-resource assertions pass.
+An independent contract report verifies all three against source JPEG ISO
+metadata, depth and HDR sidecar values. Physical View/Zoom/Edit/Save remains
+pending; do not claim a zoom fix or attribute the issue to legacy based on the
+old weak-HDR scene. A one-hour allowlisted LAN page serves only D/E/F and the
+exact new source JPEG for the requested device test. Private photos stay ignored.
+
+## 10.147 — D/E/F reject zoom workarounds; real pre/post-merge JPEG export is byte-identical (2026-10-20)
+
+Device result on the confirmed HDR capture: D/E/F all lose visible HDR when
+zooming; closing/reopening the image and entering Edit still show HDR. Removing
+altr or storing the Apple gain as one image does not fix this symptom. These
+negative results do not prove that all ISO/Apple reader handoffs or all tiling
+are excluded: E retains the tmap and F retains the primary/ISO grids. Do not
+ship those candidates as fixes or continue claiming zoom has been validated.
+
+The user specifically asks whether old working code was broken by a merge.
+Ran an actual historical comparison rather than inferring from file dates:
+
+- git archive of web/src at 9e3172e (before legacy), served in an isolated
+  snapshot using tools/smoke-ai-detail-hdr-jpeg.mjs --source-root.
+- Same at 76182ae (the actual legacy merge); git diff fe1cce1..76182ae web/src
+  is empty, so the merge retained the branch source verbatim.
+- Each browser run imports the identical new JPEG with analyze=true,
+  AI Detail disabled, and actual FFmpeg.wasm. Runtime vendor/wasm/model assets
+  have no git diff between the historical version and current tree.
+
+BeforeLegacy_Styles.HEIC and AtMerge_Styles.HEIC are both 8,853,904 bytes and
+compare equal over the entire file. SHA256
+04e874343bf94cafa57fdf583dde366529a89dc5d70c0156b22f910e7e31ae07.
+This rules out that merge changing this JPEG-to-HEIC export. It is not a
+physical Photos zoom acceptance of either historical output, nor a claim
+that every UI/queue/native/recovery path is identical.
+
+Role comparison with current Styles_Baseline.HEIC (11,412,831 bytes, SHA256
+ef90821b148f041fd1477cb4d1c88e7291c505832868a56c49e7b9100dafbe6f)
+shows 48 primary tiles and 12 source ISO gain tiles exact in payload/codec/
+colour, source tmap payload/properties exact, Styles payload exact, and linear
+thumbnail payload/properties exact. The later 1285101 export changes are the
+separate RGB Apple auxiliary and its sidecar/role, HDR visibility and compatible
+brand signalling. Do not claim these changes are the proven zoom cause before
+the old/current device comparison. Earlier PQ-vs-linear and gain-equation
+regressions in 10.143 were real mistakes during HDR repair, not evidence that
+the legacy merge itself changed this export.
+
+Two frozen history controls use the same new capture, each Styles+Texture
+without Portrait: Zoom_G_Before_Legacy.HEIC is the exact before-merge output;
+Zoom_H_Current_Without_Portrait.HEIC is the exact current Styles_Baseline.
+tests/private-fixtures/indigo-zoom-201808/history/ and history-comparison.json
+record these copies. Device View/Zoom results are pending. They distinguish
+an existing limitation on newer Adobe HDR input, a later HDR export regression,
+and the additional Portrait stage. No new production change, rollback or
+Native pipeline mutation was made for this diagnostic.
+
+## 10.148 — Historical G lacks HDR; current H fails zoom before Portrait; I/J/K isolate representation (2026-10-20)
+
+Physical result on the identical confirmed-HDR source: G (code before legacy
+merge) has no visible HDR. H (current Styles+Texture without Portrait) displays
+HDR but loses it when zooming. Therefore this newer Adobe/no-alternate-ICC input
+was not fully supported by the old code; restoring that code is not a HDR fix
+for this photo. Since H has not entered the AI Portrait stage, the zoom defect
+already exists in the generated HDR JPEG export before Portrait. Keep the
+earlier distinction: the actual pre/post-merge export is byte-identical; the
+later HDR fix adds useful compatibility but remains incomplete for zoom.
+
+Ranked next probes: primary-item choice on full-resolution load; Apple's RGB
+gain auxiliary versus native single-channel representation; competing ISO and
+Apple HDR reader routes. These are hypotheses, not a proven Photos algorithm.
+All start from the same H (Styles_Baseline.HEIC), same source capture, and no
+Portrait. Private outputs under indigo-zoom-201808/routing/:
+
+- I Zoom_I_HDR_Primary.HEIC, 11,412,831 bytes, SHA256
+  29896088629b392f8d0b7fa60aed3f8755c4045a0618187eb08b88501eec4a16:
+  change pitm from SDR 1 to HDR tmap 98 only. Exactly ONE byte differs from H;
+  every item payload, property and iref remains exact.
+- J Zoom_J_Mono_Apple_Gain.HEIC, 13,154,182 bytes, SHA256
+  f8a114a0ccf6ea5509ad2e5672d826f427c48a01bdad952da3ecdfc5b750d3b6:
+  source-equation luminance gain with normalized-log version 131072, monochrome
+  8-bit HEVC, generic Linear Gray profile/2-2-2 signalling matching the retained
+  CQ contract. Only the separate Apple gain tiles/properties change; source SDR,
+  ISO HDR, Styles, Texture, headroom and refs remain exact. Mean linear luminance
+  reconstruction error 0.0004303. RGB HDR colour may differ due to scalar collapse;
+  this is a stability diagnostic, not an accepted colour-preserving fix.
+- K Zoom_K_ISO_Only_Primary.HEIC, 11,412,802 bytes, SHA256
+  f829987a7f705754c7306b49a005d848d28692e8a58524e948271b2d36471d90:
+  same tmap primary as I, then disable only the added Apple's auxC/auxl/cdsc
+  role. Every payload stays exact, including the still-unused Apple plane;
+  ISO HDR inputs/metadata, base pixels and all edit resources remain intact.
+  It may lack editable HDR; the device test must check controls/Edit separately.
+
+The legacy discovery helper reports hdrGrid=null on K because its ISO fallback
+searches for a tmap derived FROM the declared primary, not a tmap AS primary.
+This diagnostic must inspect tmap 98 -> [1,50] directly; do not mislabel K as
+having no HDR data from that shortcut. No production parser change is bundled
+with the zoom probes. Actual read-worker diagnostics, exact-resource checks,
+and routing assertions pass for I/J/K. Physical View/Zoom/Edit results pending;
+no new production HDR change or rollback was performed.
+
+## 10.149 — J still loses HDR on zoom; single-frame encoder signalling isolated without pixel changes (2026-10-20)
+
+Device result: only J has visible HDR among I/J/K, and J still loses HDR when
+zooming. The one-channel Apple gain does not by itself solve zoom; changing
+pitm to tmap also is not an accepted fix. Do not promote I/J/K.
+
+Base-structure audit finds native HEIC examples are ALSO 8-bit 4:2:0, so do not
+assume 10-bit primary encoding is required. Their primary codec is Main Still
+Picture (profile 3), while H's FFmpeg.wasm primary/ISO/Apple RGB tiles signal
+Main (profile 1), level 255. hvcC, VPS and SPS all agree on that declaration;
+this is not just a mismatched container record. Native examples use ordinary
+bounded levels (e.g. 93). Main video at level 255/8.5 is a standards-conformance
+concern; it is not yet proven to cause this physical Photos zoom symptom.
+
+The encoder uses -frames:v 1 but does not pass total-frames=1 to libx265.
+x265's official Profile/Level/Tier documentation explains that this total-frame
+parameter selects a still-picture variant, and may be missing when called via
+another application. References:
+https://x265.readthedocs.io/en/master/cli.html#profile-level-tier
+https://www.itu.int/rec/T-REC-H.265-202108-S/en (Annex A profile constraints).
+
+Built an isolated 13df341 web/src snapshot and changed ONLY the x265 parameter
+string in its raster/ffmpeg-hevc.js by adding total-frames=1. Ran the real
+browser importRaster/FFmpeg pipeline on the same new JPEG, no AI Detail and no
+Portrait. O Zoom_O_App_Single_Frame.HEIC is 11,412,827 bytes, SHA256
+14b1b359d0d0ef3493d983595de3d01e276447bdae5f6476d721d20b4a4fd086.
+All 72 RGB primary/ISO/Apple image tiles now signal Main Still Picture.
+The actual encoded picture payload of EVERY item is byte-exact to H, as are
+all non-hvcC properties and references. Styles/Texture, headroom, tmap metadata,
+ICC/colr and even thumbnail/delta picture payloads are exact; the codec
+configuration alone changes. No source saturation/brightness compensation.
+verify-still.mjs rejects H and accepts O on the codec-signalling probe. This
+is NOT an automated test of the iPhone zoom symptom.
+
+Additional frozen reductions under indigo-zoom-201808/decode-paths/:
+- M Zoom_M_Main_Still_Picture.HEIC (17,976,131 bytes), SHA256
+  6120fb4501eec997249aafb65a50c19e4c783df2fe1c6a6d863f8a21e172c30a:
+  change only H's primary tile codec by losslessly re-encoding as Main Still
+  Picture, all decoded Y/U/V values exact. HDR/Styles/Texture payloads and refs
+  exact. This distinguishes the base decoder from O's all-encoder change.
+- L Zoom_L_Mono_Apple_Only.HEIC (13,154,047 bytes), SHA256
+  6d29a318b4520e18596fd2a100fae6920b4f6bf132b4f11416810547d9790e50:
+  J with tmap item, altr group AND tmap compatible brand removed. All retained
+  resources exact; Styles/Texture still present. A single Apple HDR reader
+  path now remains, unlike the earlier altr-only reduction E.
+- N Zoom_N_Bare_Apple_HDR.HEIC (13,151,147 bytes), SHA256
+  8633b7080f7c03b80ae7087f4dcd0b351caad3daced17874ad5c862fa384ec90:
+  minimal version of L with only primary, mono Apple gain and sidecar, and
+  source JPEG EXIF. No private Styles/Texture/Portrait resources by design;
+  base/gain picture bytes remain exact. Isolates the private edit graph.
+
+L/N may alter HDR chromaticity as J does; they are diagnostics, not proposed
+colour-preserving exports. Old first L/N builds still advertised the removed
+tmap brand; these were replaced before any link was sent, using hash-checked
+deletion of only our two generated outputs. M initially failed a profile guard
+without total-frames=1 (x265 selected an intra-extension profile), then passed
+after adding the actual still-picture parameter; no failed output was served.
+
+Prioritize O on the LAN page; M/L/N are further controls if it fails. Physical
+View/Zoom/Edit/Save remains pending. Production encoder and Native pipeline
+have NOT been changed; the trial is in an ignored snapshot. Do not claim the
+zoom root cause is established or the encoder probe is a device acceptance.
+
+Final read-worker check: O and L are known-compatible, no discovery/compatibility
+errors. N has no parse error but is classified unknown-apple-contract with its
+restored source EXIF and stripped edit graph; it is only a Photos display
+diagnostic, not an accepted Stylio re-import contract.
+
+## 10.150 — O/M/L/N all still fail zoom; isolate the full-resolution base grid (2026-10-20)
+
+Device feedback: O equals M, both still lose HDR on zoom. L/N have paler colour
+and also lose HDR on zoom. Adding total-frames=1 / Main Still Picture signalling
+is NOT sufficient to fix this symptom. No encoder change was promoted. Even N,
+with no Styles/Texture/Portrait, no ISO tmap item and no tmap brand, still fails;
+the private edit graph and competing tmap rendition are not necessary conditions.
+The mono gain conversions alter HDR chromaticity and are not accepted exports.
+
+The primary in every previous probe still used a grid of many coded tiles.
+F changed ONLY the Apple gain to a single coded image, not the base. Next probe
+therefore assembles all 4032x3024 base Y/U/V samples from H and encodes one full
+lossless Main Still Picture frame. Every decoded Y/U/V value is checked exact;
+all original auxiliary payloads (ISO HDR, Apple HDR, Styles, Texture etc.) remain
+byte-exact, as do all incoming references and base colour/geometry properties.
+
+Frozen candidates under tests/private-fixtures/indigo-zoom-201808/full-frame/:
+- P Zoom_P_One_Cell_Full_Frame.HEIC, 17,884,504 bytes, SHA256
+  b070b971591a1cfdb683fdebbb43e575f15a29a65055f6bab78963ccd5ed71a1:
+  primary remains grid 1, but its dimg references one full-resolution coded
+  image instead of 48 tiles. Actual read worker has no discovery/compatibility
+  errors. Every original non-primary payload remains exact.
+- Q Zoom_Q_Direct_Full_Frame.HEIC, 24,356,065 bytes, SHA256
+  e4a8616c9e13bcf1e5895a899db8883635c59f102cae6eb5bdd01decb94482a0:
+  same complete frame, directly declared as primary hvc1 item 1, without a grid
+  wrapper. Every incoming reference retains its original target ID. This is
+  outside the current app's grid-only import contract; generic HEIF item parsing
+  and independent FFprobe identify the 4032x3024 primary correctly. It is a
+  device diagnostic, not a supported production export/re-import design.
+
+Both share full-frame YUV SHA256
+47f97c607a57e2beee2fb3719e17dc929a7773c2c70b0e2794c79467eb5606f9.
+Generator: artifact/build/indigo-zoom-201808/full-frame.mjs. Coded profile 3,
+level 255; this experiment changes spatial base assembly, not the bounded-level
+hypothesis. Device View/Zoom/Edit/Save still pending; no production web/src edits.
+
+Independent checks: FFprobe recognizes the complete coded frame at the intended
+4032x3024 size in both files. The pinned old libheif reader cannot parse H's
+complete original graph either (reports a thumbnail target it cannot recognize),
+so it is not a pass/fail oracle for these full HDR graphs. With only each primary
+graph wrapped for that reader, both P/Q decode to identical actual RGBA output,
+SHA256 8ff6e71a38a48460e7a05958f81eb0025479dde041b4f759ab9d57ee0f02e54f,
+11,764,966 non-black pixels. check-full-frame.mjs records that scope explicitly;
+this does NOT validate Photos' HDR zoom handoff or Q's app re-import support.
+
+## 10.151 — Stop zoom experiments; accept the existing stable production route (2026-10-20)
+
+The user reports P/Q still lose HDR on zoom and additionally give wrong colours
+when applying Styles/Texture. Exact base YUV and auxiliary payload equality did
+NOT establish correct Photos editing behaviour. P/Q are rejected, not releases.
+
+The user explicitly ends this investigation, accepts temporary HDR loss and
+requests committing the most stable version. Select the existing production
+route at 13df341: accepted Adobe RGB HDR compatibility from 1285101/818674e,
+plus the fixed raster Portrait source decoder and Portrait save-lock lifecycle.
+This is the actual H Styles/Texture baseline and D Portrait baseline of the
+new scene, not the historical G export that failed to display HDR at all.
+The accepted limitation is HDR disappearing after zoom until the photo is
+closed/reopened. View/Edit HDR and the established Styles/Texture/Portrait
+route remain the target; do not intentionally strip HDR to hide the symptom.
+
+No experimental O/M encoder signalling, mono L/N conversion, or P/Q full-frame
+grid changes are promoted. Production web/src, service worker and profiles are
+already unchanged from 13df341. Preserve the original Native pipeline. The
+investigation tools and historical snapshot option are diagnostics only;
+private photos/candidate files stay ignored. No further zoom fix is authorized
+unless the user later reopens it. No new runtime asset version is required.
+
+Final stable-route verification: 160 tests passed, 13 absent optional fixtures
+skipped, zero failed in the focused native/HDR/Portrait/worker/lifecycle/export
+set (173 total). The real original Bright and HDR-native preservation controls
+run and pass, rather than being skipped. PWA and three-language checks pass.
+Fresh actual-browser import of the strong-HDR JPEG, AI Detail disabled, produces
+11,412,831 bytes, SHA256
+ef90821b148f041fd1477cb4d1c88e7291c505832868a56c49e7b9100dafbe6f,
+byte-identical to H. This verifies the selected app route, not a zoom repair.
+No production web/ or workflow files differ from 13df341.
