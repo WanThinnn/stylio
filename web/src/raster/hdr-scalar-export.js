@@ -1,8 +1,8 @@
 // JPEG RGB HDR only: port of the device-accepted rebased scalar export.
 // Native HEIC processing does not import/call this module.
-import {box,be,concat,topBox} from './box.js';
+import {box,be,concat,topBox,boxes} from './box.js';
 import {discoverHeic,extractItemData,propertyBoxBytes,dimensionsForItem,replaceItemPropertyWithSource,
- internIpcoProperty,addItems,setItemReference,setItemPropertyAssociations,replaceIdatItem} from './heif.js';
+ internIpcoProperty,addItems,setItemReference,setItemPropertyAssociations,replaceIdatItem,parseIloc} from './heif.js';
 import {encodeTmapMetadata,parseTmapMetadata,yuv420Tile} from './jpeg-hdr.js';
 import {decodeHevcYuv,convertHdrPixels,encodeHevcPixels,releaseHevcEncoder} from './ffmpeg-hevc.js';
 import {p3ToLinearI420P10} from './linear-thumbnail.js';
@@ -10,6 +10,53 @@ import {rebaseRgbHdrPair,linearGrayColr} from './hdr-scalar-pair.js';
 import {rebuildHeic} from '../styles/graft.js';
 const defaultMedia={decodeHevcYuv,convertHdrPixels,encodeHevcPixels,releaseHevcEncoder};
 const same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+
+// Only fresh raster exports use this layout. Keep EVERY item, including inactive
+// HDR graphs, and discard only mdat bytes outside the union of all iloc extents.
+// No codecs, graph pruning, property changes or idat edits belong in this step.
+export function compactRgbHdrMdat(source){
+ const top=[...boxes(source,0,source.length)];
+ if(top.length<3||top[0].type!=='ftyp'||top[1].type!=='meta'
+  ||top.slice(2).some(b=>b.type!=='mdat')||top.at(-1).off+top.at(-1).size!==source.length)
+  throw Error('Unexpected fresh HDR container layout');
+ const meta=source.slice(top[1].off,top[1].off+top[1].size),iloc=parseIloc(meta,topBox(meta,'meta'));
+ if(iloc.version!==1||iloc.offsetSize!==4||iloc.lengthSize!==4||iloc.baseOffsetSize!==0||iloc.indexSize!==0)
+  throw Error('Unsupported fresh HDR item locations');
+ const media=top.slice(2),extents=[];
+ for(const it of iloc.items.values()){
+  if(![0,1].includes(it.constructionMethod))throw Error('Unsupported fresh HDR item construction');
+  if(it.constructionMethod===1)continue; // idat stays byte-identical inside meta.
+  for(const e of it.extents){
+   // Generated files use local data references and explicit, non-empty extents.
+   if(!e.length||meta[it.extents[0].offsetPos-4]||meta[it.extents[0].offsetPos-3]
+    ||!media.some(b=>e.offset>=b.off+b.hdr&&e.offset+e.length<=b.off+b.size))
+    throw Error('Fresh HDR extent is not local mdat data');
+   extents.push(e);
+  }
+ }
+ extents.sort((a,b)=>a.offset-b.offset);
+ const ranges=[];
+ for(const e of extents){
+  const last=ranges.at(-1),end=e.offset+e.length;
+  if(last&&e.offset<=last.end)last.end=Math.max(last.end,end);
+  else ranges.push({start:e.offset,end});
+ }
+ const payloadStart=top[0].size+meta.length+8;
+ let cursor=payloadStart;
+ for(const r of ranges){r.output=cursor;cursor+=r.end-r.start;}
+ if(cursor>=2**32)throw Error('Compact HDR exceeds 32-bit item offsets');
+ let n=0;
+ for(const e of extents){
+  while(ranges[n].end<=e.offset)n++;
+  const r=ranges[n];meta.set(be(r.output+e.offset-r.start,4),e.offsetPos);
+ }
+ const out=new Uint8Array(cursor);
+ out.set(source.subarray(0,top[0].size));out.set(meta,top[0].size);
+ out.set(be(cursor-payloadStart+8,4),payloadStart-8);out.set(Uint8Array.of(109,100,97,116),payloadStart-4);
+ for(const r of ranges)out.set(source.subarray(r.start,r.end),r.output);
+ return out;
+}
+
 export async function makeRgbHdrEditable(source,{headroom,primaries},onProgress,media=defaultMedia){
  let phase='read';try{
  const d=discoverHeic(source),tmap=[...d.infos].find(([,i])=>i.type==='tmap')?.[0];
@@ -114,7 +161,8 @@ export async function makeRgbHdrEditable(source,{headroom,primaries},onProgress,
  const metadata=encodeTmapMetadata(solved.metadata);
  if(d.iloc.items.get(tmap)?.constructionMethod===1)meta=replaceIdatItem(meta,tmap,metadata);
  else payloads.set(tmap,metadata);
- const data=rebuildHeic(source,d,source.slice(0,topBox(source,'ftyp').size),meta,payloads);
+ phase='pack referenced data';
+ const data=compactRgbHdrMdat(rebuildHeic(source,d,source.slice(0,topBox(source,'ftyp').size),meta,payloads));
  return {data,metrics:solved.metrics};
  }catch(error){throw new Error(`Editable HDR (${phase}): ${error.message}`,{cause:error});}
 }

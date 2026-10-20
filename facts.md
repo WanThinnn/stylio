@@ -6313,3 +6313,42 @@ and additional processing work. Native Bright/HDR preservation remains separatel
 verified byte-for-byte. The stopped zoom investigation remains stopped; no claim
 is made that every third-party HDR format or capture has been device-validated.
 No earlier rejected colour/header/topology probes are promoted.
+
+## 10.160 — Lossless removal of unreferenced mdat payload (2026-10-20)
+
+The user authorizes removing the measured 7.28 MB of unreferenced data first.
+Do not prune the separate inactive HDR item graphs (~4.04 MB), lower resolution,
+re-encode pixels or change the accepted scalar/base solve as part of this work.
+
+Fresh RGB HDR JPEG scalar exports now pack the union of ALL method-0 iloc
+extents into one mdat. Shared, overlapping and multiple extents retain their
+bytes and lengths. Every item remains, including inactive original HDR items;
+all idat data, properties, references and private metadata remain unchanged.
+Only method-0 absolute offsets are relocated. The helper rejects unsupported
+layouts, external or out-of-mdat locations instead of discarding unknown data.
+It is called only after the fresh RGB HDR scalar rewrite. The general graft
+writer, native HEIC preservation and already-scalar no-op route are unchanged.
+
+On the actual accepted Production_Scalar_Styles.HEIC, size changes from
+24,818,608 to 17,534,602 bytes (29.34897% smaller). Removed bytes: 7,283,998
+unreferenced payload bytes plus one 8-byte mdat header. Packed SHA256:
+fd084dc41bbd73f83c7d159bc7ecf42f4b47e53d438679d3511d0a1770680653.
+Private output: tests/private-fixtures/indigo-color-2024/Production_Scalar_Styles_Compact.HEIC.
+
+The real raster -> scalar export call-site test initially failed with 148 orphan
+bytes, then passes with zero. Regressions cover shared/overlapping/multiple
+extents, idat and metadata equality, invalid locations, and byte-idempotence.
+All extracted item payloads and all metadata except relocated offset fields
+match the accepted real output exactly. Scalar/Portrait/Texture integration
+still passes. Seven scalar tests and 59 related native/HDR/raster/worker/release
+tests pass; two optional worker fixtures are absent. The real Bright and native
+HDR preservation controls run and remain byte-identical to historical outputs.
+PWA consistency passes; cache is v233. No codec quality or HDR equation changed.
+The packed file has not yet received a new physical iPhone check; numerical and
+byte comparisons are not a new claim of Photos device acceptance. No commit or
+push performed for this packing change at this checkpoint.
+
+Release authorization: the user subsequently replies "ok" and explicitly asks
+to put this packing change into production. Proceed with master commit/push and
+verify the Pages deployment for that exact commit. This is release approval;
+the short reply does not independently document a detailed new iPhone test.

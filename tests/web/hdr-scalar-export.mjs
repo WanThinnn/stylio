@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {rebaseRgbHdrPair,linearGrayColr} from '../../web/src/raster/hdr-scalar-pair.js';
 import {srgbToLinear} from '../../web/src/raster/jpeg-hdr.js';
 import fs from 'node:fs';
-import {makeRgbHdrEditable} from '../../web/src/raster/hdr-scalar-export.js';
+import {makeRgbHdrEditable,compactRgbHdrMdat} from '../../web/src/raster/hdr-scalar-export.js';
 import {buildGeneratedProfile} from '../../web/src/raster/generated-profile.js';
 import {generateSyntheticHevc} from '../../web/src/raster/synthetic-hevc.js';
 import {buildRasterHeic,targetGeometry} from '../../web/src/raster/raster-import.js';
@@ -12,6 +12,69 @@ import {parseTmapMetadata} from '../../web/src/raster/jpeg-hdr.js';
 import {buildAiPortrait} from '../../web/src/portrait/ai-portrait-export.js';
 import {executeJob} from '../../web/src/media/heic-worker.js';
 import {hasTexture} from '../../web/src/styles/texture.js';
+import {boxes,box,concat,be,topBox} from '../../web/src/core/box.js';
+import {parseIloc} from '../../web/src/core/heif.js';
+
+function unusedMdat(bytes,d=discoverHeic(bytes)){
+ const ranges=[...d.iloc.items.values()].filter(i=>i.constructionMethod===0)
+  .flatMap(i=>i.extents.map(e=>[i.baseOffset+e.offset,i.baseOffset+e.offset+e.length])).sort((a,b)=>a[0]-b[0]);
+ let used=0,end=-1;
+ for(const [a,b]of ranges){used+=Math.max(0,b-Math.max(a,end));end=Math.max(end,b);}
+ return [...boxes(bytes,0,bytes.length)].filter(b=>b.type==='mdat').reduce((n,b)=>n+b.size-b.hdr,0)-used;
+}
+
+test('mdat packing preserves shared/overlapping/multiple extents and idat while removing only gaps',()=>{
+ const ftyp=box('ftyp',new Uint8Array(8)),first=box('mdat',Uint8Array.of(90,1,2,3,4,91)),second=box('mdat',Uint8Array.of(92,5,6,93));
+ const item=(id,method,extents)=>concat([be(id,2),be(method,2),be(0,2),be(extents.length,2),
+  ...extents.map(([offset,length])=>concat([be(offset,4),be(length,4)]))]);
+ const makeMeta=(a,b)=>box('meta',concat([be(0,4),box('iloc',concat([Uint8Array.of(1,0,0,0,0x44,0),be(4,2),
+  item(1,0,[[a,3],[b,2]]),item(2,0,[[a+1,3]]),item(3,0,[[a,3]]),item(4,1,[[1,2]])])),
+  box('idat',Uint8Array.of(9,8,7,6)),box('free',Uint8Array.of(55,66))]));
+ const meta=makeMeta(0,0),a=ftyp.length+meta.length+9,b=ftyp.length+meta.length+first.length+9;
+ const source=concat([ftyp,makeMeta(a,b),first,second]),saved=source.slice(),out=compactRgbHdrMdat(source);
+ const old=parseIloc(source,topBox(source,'meta')),packed=parseIloc(out,topBox(out,'meta'));
+ assert.deepEqual(source,saved);assert.equal(source.length-out.length,12); // four gap bytes + one mdat header
+ assert.deepEqual([...boxes(out,0,out.length)].map(b=>b.type),['ftyp','meta','mdat']);
+ for(const [id,it]of old.items){
+  const now=packed.items.get(id);assert.equal(now.constructionMethod,it.constructionMethod);
+  if(it.constructionMethod===1)assert.deepEqual(now.extents,it.extents);
+  else for(let n=0;n<it.extents.length;n++){
+   const e=it.extents[n],p=now.extents[n];assert.equal(p.length,e.length);
+   assert.deepEqual(out.slice(p.offset,p.offset+p.length),source.slice(e.offset,e.offset+e.length));
+  }
+ }
+ assert.equal(packed.items.get(1).extents[0].offset,packed.items.get(3).extents[0].offset,'shared storage stays shared');
+ const oldMeta=source.slice(ftyp.length,ftyp.length+meta.length),newMeta=out.slice(ftyp.length,ftyp.length+meta.length);
+ for(const it of old.items.values())if(it.constructionMethod===0)for(const e of it.extents){
+  oldMeta.fill(0,e.offsetPos-ftyp.length,e.offsetPos-ftyp.length+4);
+  newMeta.fill(0,e.offsetPos-ftyp.length,e.offsetPos-ftyp.length+4);
+ }
+ assert.deepEqual(newMeta,oldMeta,'every metadata byte except relocated offsets stays identical');
+ assert.deepEqual(compactRgbHdrMdat(out),out,'packing is byte-idempotent');
+ const invalid=source.slice();invalid.set(be(1,4),old.items.get(1).extents[0].offsetPos);
+ assert.throws(()=>compactRgbHdrMdat(invalid),/not local mdat/);
+ assert.throws(()=>compactRgbHdrMdat(concat([source,box('free',new Uint8Array())])),/layout/);
+ const external=source.slice();external[old.items.get(1).extents[0].offsetPos-3]=1;
+ assert.throws(()=>compactRgbHdrMdat(external),/not local mdat/);
+});
+
+const acceptedExport=new URL('../private-fixtures/indigo-color-2024/Production_Scalar_Styles.HEIC',import.meta.url);
+test('accepted app export loses only orphan bytes; all active and inactive items and metadata remain identical',{
+ skip:!fs.existsSync(acceptedExport),
+},()=>{
+ const source=new Uint8Array(fs.readFileSync(acceptedExport)),d=discoverHeic(source),out=compactRgbHdrMdat(source),packed=discoverHeic(out);
+ assert.equal(unusedMdat(out,packed),0);assert.ok(out.length<source.length);
+ assert.deepEqual(packed.refs,d.refs);assert.deepEqual(packed.infos,d.infos);
+ for(const id of d.iloc.items.keys())assert.deepEqual(extractItemData(out,packed,id),extractItemData(source,d,id),`item ${id}`);
+ const oldMeta=source.slice(d.meta.off,d.meta.off+d.meta.size),newMeta=out.slice(packed.meta.off,packed.meta.off+packed.meta.size);
+ for(const it of d.iloc.items.values())if(it.constructionMethod===0)for(const e of it.extents){
+  oldMeta.fill(0,e.offsetPos-d.meta.off,e.offsetPos-d.meta.off+4);
+  newMeta.fill(0,e.offsetPos-d.meta.off,e.offsetPos-d.meta.off+4);
+ }
+ assert.deepEqual(newMeta,oldMeta,'including ICC, tmap, Styles and unknown private metadata');
+ assert.equal(source.length-out.length,unusedMdat(source,d)+8*([...boxes(source,0,source.length)].filter(b=>b.type==='mdat').length-1));
+ assert.deepEqual(compactRgbHdrMdat(out),out);
+});
 
 test('scalar export keeps chromatic HDR by solving a new base, rather than just averaging gain',async()=>{
  const base=Uint8Array.of(40,80,120,60,90,130),gain=Uint8Array.of(240,110,20),saved=base.slice();
@@ -79,6 +142,7 @@ test('actual raster assembly -> scalar export -> Portrait/Texture shares a full-
   async encodeHevcPixels(){encoded++;return {hvcc:codec,payload:Uint8Array.of(5,encoded)};},
  };
  const out=await makeRgbHdrEditable(source,{headroom:4,primaries:'smpte432'},null,media),d=discoverHeic(out.data);
+ assert.equal(unusedMdat(out.data,d),0,'fresh scalar export must not retain replaced image/thumbnail bytes');
  assert.ok(released>=3,'codec heap is released between decoding, paired encoding and thumbnails');
  assert.deepEqual(source,saved);assert.equal(d.primary,before.primary);assert.equal(d.stylesItem,before.stylesItem);
  const t=[...d.infos].find(([,i])=>i.type==='tmap')[0];
