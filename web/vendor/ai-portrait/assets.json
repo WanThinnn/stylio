@@ -47,6 +47,21 @@
       "url": "https://huggingface.co/onnx-community/depth-anything-v3-small/resolve/0b6a7f3bf5595f9950b91389e0da3a0de130324c/onnx/model.onnx_data",
       "bytes": 104702464,
       "sha256": "802bb24741e67f5bb2b369fc64d40afe11439cc895d676d658d65cfb75c9860f"
+    },
+    "subject-encoder.onnx": {
+      "url": "https://huggingface.co/spaces/chongzhou/EdgeSAM/resolve/32266dda3cf1d5ea1cdccd386de1eb3355d0f0b9/weights/edge_sam_3x_encoder.onnx",
+      "bytes": 22098300,
+      "sha256": "719a498cf5b3fe9be9f01ee513e13d3915f9028aa4f23dfd30eaaa0a17143159"
+    },
+    "subject-decoder.onnx": {
+      "url": "https://huggingface.co/spaces/chongzhou/EdgeSAM/resolve/32266dda3cf1d5ea1cdccd386de1eb3355d0f0b9/weights/edge_sam_3x_decoder.onnx",
+      "bytes": 15937006,
+      "sha256": "83a2174d54571596913dcb7455d021e713623c3dca30a31c8c41ab98c9fb0863"
+    },
+    "SUBJECT-MODEL-LICENSE.txt": {
+      "url": "https://raw.githubusercontent.com/chongzhou96/EdgeSAM/d24d99671f41a9c0003061248bded64a481e9059/LICENSE",
+      "bytes": 1717,
+      "sha256": "cfd654022bdc44fdd809670d50239bcb1ebf2f4a661dca7e328f93c269538246"
     }
   },
   "models": {
@@ -68,5 +83,12 @@
       "variant": "fp32",
       "license": "Apache-2.0"
     }
+  },
+  "subject": {
+    "model": "EdgeSAM-3x",
+    "source": "https://github.com/chongzhou96/EdgeSAM",
+    "revision": "32266dda3cf1d5ea1cdccd386de1eb3355d0f0b9",
+    "license": "S-Lab-1.0",
+    "purpose": "Personal non-commercial subject depth assistance; loaded only with AI Portrait."
   }
 }

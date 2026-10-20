@@ -100,6 +100,27 @@ test('RGB edge refinement reduces depth bleeding without fabricating texture geo
   assert.deepEqual(ramp.slice(0,45),refined.slice(0,45),'distant flat background remains intact');
 });
 
+test('a resolved depth silhouette is not eroded by a dark label matching the background',()=>{
+  const w=128,h=128,rgb=new Uint8Array(w*h*3),gray=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const p=y*w+x,inside=x>=40&&x<88&&y>=20&&y<108;
+    gray[p]=inside?230:40;
+    rgb.set(inside&&!(y>=55&&y<75)?[220,220,220]:[30,30,30],p*3);
+  }
+  assert.deepEqual(refineDepthEdges(gray,rgb,w,h),gray,'RGB ambiguity must not soften an already resolved depth boundary');
+});
+
+test('high-contrast multi-pixel uncertainty is still fitted instead of mistaken for a resolved step',()=>{
+  const w=64,h=16,rgb=new Uint8Array(w*h*3),gray=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const p=y*w+x;rgb.set(x<32?[25,40,180]:[220,40,25],p*3);
+    gray[p]=x<31?40:x===31?100:x===32?160:220;
+  }
+  const fixed=refineDepthEdges(gray,rgb,w,h);
+  const error=map=>Math.abs(map[31]-40)+Math.abs(map[32]-220);
+  assert.ok(error(fixed)<error(gray),'a large adjacent jump alone cannot prove a completed silhouette');
+});
+
 test('native-resolution refinement can resolve a thin silhouette lost by the old 256-pixel fitting grid',()=>{
   const w=1024,h=24,rgb=new Uint8Array(w*h*3),gray=new Uint8Array(w*h);
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){

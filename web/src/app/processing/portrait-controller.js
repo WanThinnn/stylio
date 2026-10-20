@@ -46,7 +46,7 @@ export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcce
       if(aiFeatures.enabled('style'))await import('../../recommend/style-runtime.js').then(({releaseStyleRecommender})=>releaseStyleRecommender()).catch(()=>{});
       const result = await createAiPortrait(data,(stage,progress)=>{
         lastStage=stage;
-        const stageProgress={loading:90,modelLoading:92,modelCache:92,modelCacheWarning:92,qualityFallback:93,inference:94,inferenceCpu:94,refining:96}[stage];
+        const stageProgress={loading:90,modelLoading:92,modelCache:92,modelCacheWarning:92,qualityFallback:93,inference:94,inferenceCpu:94,refining:96,subjectRefining:96}[stage];
         if(stageProgress!==undefined)ui.progress?.(stageProgress);
         if(['download','modelDownload'].includes(stage)&&progress?.loaded){const ratio=progress.total?Math.max(0,Math.min(1,progress.loaded/progress.total)):0;ui.progress?.(90+ratio*3);const percent=progress.total?` ${Math.min(100,Math.round(progress.loaded/progress.total*100))}%`:'';
           ui.aiState(`${aiText().modelDownload}${percent} · ${formatBytes(progress.loaded)}`);
@@ -69,7 +69,7 @@ export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcce
       catch(error){console.warn('Portrait preview unavailable; edit focus in Photos',error);}
       candidate.state = 'done';
       ui.aiView(aiFeatures.enabled('portrait'));
-      if(aiFeatures.enabled('portrait')){ui.progress?.(100);ui.aiState('');ui.note(aiText().ready,'ai');}
+      if(aiFeatures.enabled('portrait')){ui.progress?.(100);ui.aiState('');ui.note(result.subjectReport?.reason==='unavailable'?`${aiText().ready} ${aiText().subjectUnavailable}`:aiText().ready,'ai');}
     } catch(error) {
       candidate.state = error.name==='AbortError'?'new':'failed';
       console.warn('Optional AI Portrait failed',error);

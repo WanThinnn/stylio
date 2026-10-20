@@ -131,6 +131,12 @@ function refineDepthTile(gray,rgb,w,h,radius){
     const x=p%w,y=Math.floor(p/w),value=gray[p];
     if((x===0||gray[p-1]===value)&&(x===w-1||gray[p+1]===value)
       &&(y===0||gray[p-w]===value)&&(y===h-1||gray[p+w]===value)){out[p]=value;continue;}
+    // The model has already resolved these one-pixel depth discontinuities.
+    // Fitting RGB across them can erode a dark label into an equally dark
+    // background, or pull that background forward. Fit uncertain ramps only.
+    const jump=Math.max(x?Math.abs(value-gray[p-1]):0,x+1<w?Math.abs(value-gray[p+1]):0,
+      y?Math.abs(value-gray[p-w]):0,y+1<h?Math.abs(value-gray[p+w]):0);
+    if(jump>0&&jump>=(maximum[p]-minimum[p])*.75){out[p]=value;continue;}
     const fitted=smooth[3][p]+smooth[0][p]*rgb[p*3]/255+smooth[1][p]*rgb[p*3+1]/255+smooth[2][p]*rgb[p*3+2]/255;
     let lo=minimum[p],hi=maximum[p];
     lo=Math.min(lo,gray[p]);hi=Math.max(hi,gray[p]);

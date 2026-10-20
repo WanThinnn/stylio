@@ -6,6 +6,7 @@ import {aiSourceCanvas,rgbSample} from './ai-portrait-source.js';
 import {inferDepth,awaitAiSource,depthInputBudgets,canRetryDepth,canFallbackDepthToCpu} from './ai-inference.js';
 import {readPersonGuidance} from './person-depth-guidance.js';
 import {depthModel} from './depth-models.js';
+import {refinePortraitSubject} from './subject-inference.js';
 
 export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{signal,provider='webgpu',modelId='standard'}={}) {
   depthModel(modelId);
@@ -55,7 +56,20 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
     if(!inferred)throw lastError||Error('AI depth inference failed');
     // Custom providers may return float values. The production worker refines
     // the map off the UI thread and quantizes only after guided resampling.
-    const gray=shapeAiDisparity(inferred.gray||refineDepth(inferred.values,inferred.mw,inferred.mh,previewRgb,width,height));
-    return {gray,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,provider:usedProvider,modelId};
+    let gray=shapeAiDisparity(inferred.gray||refineDepth(inferred.values,inferred.mw,inferred.mh,previewRgb,width,height)),subjectReport;
+    // The depth worker has finished and been terminated. Release the decode
+    // surface before the separate subject encoder/decoder allocation.
+    source.width=source.height=0;
+    try{
+      onProgress('subjectRefining');
+      const subject=await refinePortraitSubject(gray,previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
+      if(!(subject.gray instanceof Uint8Array)||subject.gray.length!==gray.length)throw Error('Invalid refined subject depth');
+      gray=subject.gray;subjectReport=subject.subjectReport;
+    }catch(error){
+      signal?.throwIfAborted();if(['AbortError','TimeoutError'].includes(error.name))throw error;
+      console.warn('Subject refinement unavailable; retaining generated depth',error);
+      subjectReport={applied:false,reason:'unavailable'};
+    }
+    return {gray,subjectReport,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,provider:usedProvider,modelId};
   } finally { if(source)source.width=source.height=0; }
 }

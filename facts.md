@@ -6821,3 +6821,133 @@ logic changed after that run. Acceptance covers the tested photo/device flow,
 not a proof of native metric depth accuracy or identical blur on every camera.
 Code remains in the master working tree. This device acceptance alone does not
 request a new commit, push or production deployment.
+
+## 10.171 — Bottle depth error: model bias and resolved-edge erosion (2026-10-20)
+
+The user pushed accepted O changes as 4f83137, then supplied Downloads/depth-issue/
+iCloud Photos: IMG_2139_org.HEIC (1,750,506 bytes, sharp source),
+IMG_2140_native_app.HEIC (894,147 bytes, native rendered Portrait), and
+IMG_2141_stylio_2139.HEIC (613,241 bytes, rendered Stylio Portrait). They report
+f1.4, 2x Fusion crop, same focus on the white bottle cap: Stylio blurs the bottle
+and has ragged edges. The two rendered exports retain their depth maps but lack
+the complete editing graph; this is not evidence of lost asset controls. They
+are neighboring captures with small framing differences, not registered pixel
+truth. Both originals' optics are focal 6.765mm / 48mm equivalent, no additional
+DigitalZoomRatio. The crop is represented by the equivalence; do not diagnose
+an optical telephoto lens mismatch or double-count an imaginary zoom field.
+
+All diagnostics/photos stay ignored under artifact/build/depth-bottle-2139 and
+tests/private-fixtures/depth-bottle-2139. extract.mjs reads the actual compressed
+auxiliaries and decodes RGB/depth. Display-oriented interior ROI medians (8-bit
+encoding, NOT metres): native cap about224 / label225 / base222; Stylio cap214 /
+label234 / base231. Existing Standard model replay, same stored orientation and
+630x476 patch geometry, yields shaped cap215 / label233 / base231. Thus the
+cap/body error already exists in AI inference; export or focus coordinate fixes
+alone cannot remove it. Offline inference uses CPU/Pillow resampling, not a
+claim of browser/WebGPU bit identity. The original's portrait-effects matte does
+not delineate the bottle, so it cannot serve as an object mask for this fix.
+
+Controlled probes: upright Standard still separates cap/body (200/219); Lite
+also does; Pro sideways is substantially worse and Pro upright retains a gap.
+Do not silently replace the default model or raise Safari's safe 630/518 input
+budget. Full-frame 1036 inference reduces the gap only modestly (223/236) and is
+not enabled on iPhone. Cropped detail inference reduces within-bottle depth
+separation, but does not establish correct depth over the rest of the scene.
+The private fusion.py prototype chooses a half-size detail window from positive
+depth-corner response weighted by relative nearness, robustly fits a positive
+affine disparity mapping to the global field, and feathers the window back in.
+Its chosen stored rectangle is approximately .228/.176/.728/.676, derived from
+this map, not a production bottle-coordinate constant. This is a heuristic detail
+probe, NOT semantic object segmentation or a generally validated depth solver.
+No detail inference/fusion has been integrated into the app worker yet.
+
+A separate real refinement bug is reproduced by a synthetic resolved silhouette
+with a dark label matching its background: refineDepthEdges moves an already
+correct foreground boundary from230 to206, with 508 changed pixels / total
+absolute depth error3292. The regression fails before the fix. The fitter now
+preserves a resolved one-pixel discontinuity when its adjacent jump accounts for
+at least75% of the measured local depth envelope; this is relative transition
+shape policy, not a copied camera calibration. Multi-pixel ramps still fit.
+Tests cover both dark-label preservation and large multi-pixel ramps, alongside
+thin silhouettes, tile seams, person protection and the export preservation paths.
+This guard does not claim to fix the model's incorrect cap/body surfaces or all
+ragged edges. 110 related tests pass, no failures/skips; development cache v239.
+
+Two fresh source-preserving candidates use the same source2139 + Texture,
+projection-v1 range6.234883442202992, HDR capacity3.149246, f1.4 and stored focus
+(.41,.5), corresponding to display(.5,.41) on the white cap. Every pre-existing
+non-Exif payload, property association/box and reference is verified unchanged;
+the accepted modern-camera Portrait MakerNote mutations remain in use.
+A/B differ only in AI depth samples, not HDR or blur-strength metadata:
+- Bottle_A_Edge.HEIC: current inference plus resolved-edge guard; 1,875,980 bytes;
+  SHA256 09a7fc3b955c87e556bc35bdc2fb863b6e2b1a4d4d1db1f05127d3ee6a9fe181.
+- Bottle_B_Detail.HEIC: same guard plus experimental fused detail; 1,882,342 bytes;
+  SHA256 fd8a1c3e5774d697fcb7049140d94cdfa0c87d3e79594405309938da95d3a933.
+  Cap/body/base medians223/233/231 versus A215/233/231. Improvement is partial;
+  it does not yet match the near-flat Native bottle depth.
+
+Explicit two-file local server on 192.168.1.3:8775 reuses the existing random
+route and existing renewed-session expiry 2026-10-20T13:57:39.960Z (20:57:39),
+without extending it. Own server PID12112, artifact/build/depth-bottle-2139/
+serve.mjs, hidden process, allowlisted GET/HEAD only. B HEAD returns200 with the
+expected1,882,342 bytes. Phone comparison asks same cap focus/f1.4, label and
+silhouette vs A/Native, background blur and retained HDR/controls. That validation
+is pending. Only the narrow resolved-edge fix/tests/cache/docs are in the working
+tree; no new commit/push/deployment. The underlying depth accuracy issue remains
+open; do not describe this as a complete bottle-depth repair.
+
+## 10.172 — Semantic subject mask resolves the bottle; personal-use scope (2026-10-20)
+
+Phone feedback rejects both Bottle_A_Edge and Bottle_B_Detail: both still erode
+the silhouette and defocus label text. Do not call cropped detail fusion a fix.
+An ignored CPU EdgeSAM-3x probe, using the actual RGB and a positive point on the
+cap, produces four candidates. The focus-connected, contained, largest candidate
+within .03 of the best estimated quality selects the entire bottle (56,172 pixels)
+without tracing a manual silhouette or copying Native depth. Masks and downloaded
+weights remain private/ignored. EdgeSAM official code/model URLs are recorded in
+artifact/build/depth-bottle-2139; no EdgeSAM model has been added to app assets.
+
+Two new source-preserving outputs keep the existing primary/HDR/Styles/Texture
+resources, projection-v1 range6.234883442202992, HDR capacity3.149246 and f1.4:
+- Bottle_C_Subject_Plane.HEIC, 1,866,668 bytes, SHA256
+  2bd30ae5ecd3b028f562b7bc0dc5b66f77997dafd891f45685d00a26bd6920df.
+  A deliberate diagnostic constant depth228 inside the semantic mask; not the
+  intended production treatment of every object.
+- Bottle_D_Subject_Coherence.HEIC, 1,867,808 bytes, SHA256
+  cca6104bea39c434876f7232446b77ab3bf79e421f8c8c73ecb11f286f393d57.
+  Uses experimental subject-depth-guidance.js: measure core/ring medians and
+  internal spread; decline strong internal separation, compress only weak relief
+  on a separated segmented foreground subject. Core median228, surrounding gap72,
+  robust spread26, residual scale(26/72)^3=.0470893347. Cap/label/base medians
+  227/228/228. No depth pixel outside the binary mask changes. This is relative
+  focus assistance, not recovered measured depth or a guarantee for arbitrary 3D
+  objects; the heuristic safety guards do not prove every real 3D separation.
+
+User accepts both C/D on iPhone: no eroded silhouette, label text no longer blurred.
+C and D look nearly the same; C has slightly stronger background blur, below5% by
+the user's visual assessment. D is the accepted implementation direction.
+The new portable tests cover coherent-subject separation, preserving a distinctly
+separated internal surface, repairing an eroded rim from a constant confident
+interior, invalid/uncertain masks, and replay of the actual cached D depth field.
+The latter verifies D stays byte-identical after guard changes; five new tests pass
+locally, including the private replay. CI references and precache include the new
+experimental module, but it is NOT called by the app inference worker yet.
+
+At first the agent assumed potential commercial use and considered MobileSAM
+instead of EdgeSAM. The user explicitly corrects this: the app is solely for the
+user's personal use and is not sold. Do not assume this app is commercial or force
+a replacement for that reason. EdgeSAM's official S-Lab1.0 license explicitly
+permits non-commercial use and redistribution with its stated notice conditions.
+MobileSAM's official Apache2 license is also verified; no MobileSAM defect was
+discovered. Private Acly MobileSAM ONNX checks identify the whole bottle too, but
+that alternative has NOT replaced the device-accepted EdgeSAM mask or been wired
+into the app. The user said 'khoan' to ask about this choice; answer that question
+before proceeding with implementation. Current code still has no app-level SAM
+download, encoder/decoder session, automatic object-mask selection or worker
+integration; these must be implemented and browser/device-validated before saying
+D is integrated. No new commit/push/deployment.
+
+C/D downloads use the same LAN route/port8775 and original expiry20:57:39;
+server was restarted only after verifying its own command line, new PID12800.
+Both HEAD responses200 with the exact lengths above. Do not silently extend this
+session beyond2026-10-20T13:57:39.960Z.
