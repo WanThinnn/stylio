@@ -135,7 +135,7 @@ try{
    "hdrDetail:result.hdrDetail||null,primary:d.primary,primaryTiles:d.primaryTiles.length,isoGain,hdrGrid:d.hdrGrid,hdrTiles:d.hdrTiles.length,"+
    "stylesItem:d.stylesItem,tmap:{baseHeadroom:metadata.baseHeadroom,alternateHeadroom:metadata.alternateHeadroom,channels:metadata.channels,useBaseColorSpace:metadata.useBaseColorSpace},events};"+
    '})('+JSON.stringify(cfg)+')';
- console.log('Running '+(detail?model+' AI Detail':'source-preserving')+' HDR JPEG smoke on '+input+' ...');
+ console.log('Running '+(detail?model+' AI Detail':'HDR import')+' JPEG smoke on '+input+' ...');
  const out=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},1200000);
  if(out.exceptionDetails)throw Error(JSON.stringify(out.exceptionDetails));
  const value=out.result?.value;if(!value)throw Error('No smoke result');

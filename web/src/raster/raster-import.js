@@ -27,6 +27,7 @@ import {rgbaToI420} from './raster-color.js';
 import {generateSyntheticHevc} from './synthetic-hevc.js';
 import {buildStyleMarker,validateStyleRecommendation} from '../recommend/style-selection.js';
 import {applyStyleDisplayRgba,shouldRenderStyleDisplay} from '../recommend/style-display-render.js';
+import {makeRgbHdrEditable} from './hdr-scalar-export.js';
 
 const TILE = 512, MAX_PRIMARY_TILES = 48;
 const THUMB_W = 416, THUMB_H = 312;
@@ -915,7 +916,14 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
         appleHdrHeadroom:appleHdr.headroom,appleHdrColr:appleHdr.colr}:{}),
       lightMaps:analyze?buildLightMaps(sampleRasterLuma(working,32,32)):null,
     },analyze?Array.from(sampleRasterLuma(working)).sort((a,b)=>a-b):null,null,geometry);
-    const result={data,geometry,hdr:true,detailApplied:Boolean(enhanced&&rebase),detailSkipped,styleDisplayRendered,
+    // Photos does not preserve this RGB legacy auxiliary reliably after saving.
+    // Rebase both SDR and scalar gain, as validated on the physical Indigo case.
+    // This call is confined to freshly imported RGB HDR JPEGs, never Native HEIC.
+    const editable=appleHdr?await makeRgbHdrEditable(data,{headroom:appleHdr.headroom,primaries:hdr.primaries},onProgress):null;
+    const outputGeometry=editable?{...geometry,hdrWidth:width,hdrHeight:height,
+      hdrColumns:geometry.primaryColumns,hdrRows:geometry.primaryRows}:geometry;
+    const result={data:editable?.data??data,geometry:outputGeometry,hdr:true,detailApplied:Boolean(enhanced&&rebase),detailSkipped,styleDisplayRendered,
+      ...(editable?{hdrScalarRebased:true,hdrRebase:editable.metrics}:{}),
       ...(styled.recommendation?{styleRecommendation:styled.recommendation}:{}),
       ...((suggested.error||styled.error)?{styleSuggestionError:suggested.error||styled.error}:{})};
     if(rebase)result.hdrDetail={clipped:rebase.clipped,components:rebase.components,maxError:rebase.maxError};

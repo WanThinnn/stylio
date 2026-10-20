@@ -71,6 +71,9 @@ jobs:
       - name: Check edited native Styles and original-photo preservation
         run: node --test tests/web/native-export-texture.mjs tests/web/native-rebuild-hdr.mjs tests/web/native-style-rebuild.mjs tests/web/hdr-linear-thumbnail.mjs tests/web/heic-grid-sample.mjs
 
+      - name: Check editable RGB HDR colour reconstruction
+        run: node --test tests/web/hdr-scalar-export.mjs
+
       - name: Check AI Styles, Portrait export, and photo preservation before publishing
         run: node --test tests/web/ai-portrait-source.mjs tests/web/portrait-controller.mjs
 

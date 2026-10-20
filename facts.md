@@ -5963,3 +5963,353 @@ Fresh actual-browser import of the strong-HDR JPEG, AI Detail disabled, produces
 ef90821b148f041fd1477cb4d1c88e7291c505832868a56c49e7b9100dafbe6f,
 byte-identical to H. This verifies the selected app route, not a zoom repair.
 No production web/ or workflow files differ from 13df341.
+
+## 10.152 — New HDR colour error after Photos Edit/Save; RGB gain is lost in the supplied render (2026-10-20)
+
+The user reports the accepted export still has wrong colours in HDR, especially
+the pharmacy sign, while SDR looks normal. Supplied IMG_2024.HEIC is the image
+after a small edit/save; IMG_2025.JPEG is a screenshot. The latter has no embedded
+gain map and cannot preserve the display's full HDR luminance. This reopens HDR
+COLOUR investigation only; the zoom investigation remains stopped as requested.
+Do not describe the accepted baseline as fully colour-correct after Edit/Save.
+
+IMG_2024 is 1,661,065 bytes, SHA256
+586d5c02324b50aa6d2a4bff2667a28b985569dc133ed5fe22a2c82a4bafc8b2.
+It is a Photos-rendered 4032x3024 primary 49 with 48 tiles, Apple HDR gain grid
+64 at 2016x1512 with 12 tiles, headroom 8 and version 131072. It also retains
+depth item 66. No ISO tmap or Styles resource is present in this rendered file;
+that does not establish that the Photos asset lost its editable controls.
+Primary and gain both have identity orientation, ruling out an ignored rotation
+in this local comparison. The output gain has RGB pixi, HEVC chroma 4:2:0, a
+generic Linear Gray ICC and SPS full-range 2/8/6.
+
+Important raw-plane measurement: despite that three-channel container, every
+decoded U and V sample of ALL twelve saved HDR tiles is neutral 128. The gain
+therefore contains scalar/gray data only. The actual pre-edit production
+Portrait baseline has non-neutral U in 734,523 and V in 720,104 of 786,432 samples
+per plane. extractplanes=u/v copies the decoded channels directly, so this is
+not an ICC transform, RGB preview or tone-mapping artefact in our analysis.
+Generator/report: artifact/build/indigo-color-2024/audit-planes.mjs and ignored
+tests/private-fixtures/indigo-color-2024/chroma-planes.json.
+
+This is evidence of loss of the independent chromatic gain in the supplied
+Photos render, consistent with the reported HDR-only colour issue. It does not
+prove every mono gain map is invalid, or identify the exact private Photos stage
+that collapsed it. The exact changed control is not recorded, the saved base is
+also re-rendered (mean 7.53/255 component difference from H), and the two files
+cannot be treated as a controlled equal-setting pixel comparison. Local source-
+equation visualizations use common SDR tone compression and are NOT screenshots
+of the actual iPhone HDR output. Global MAE is not an acceptance oracle.
+
+Two new private probes start from the exact production Portrait baseline D,
+without changing ANY item payload, graph reference, base profile/pixels,
+Styles/Texture/depth or gain headroom/equation:
+- Color_1_Linear_Gray.HEIC, 11,597,326 bytes, SHA256
+  6480b616cb8aa1ca3a9990a7bdce70c97f52b5380fd7fb2c3e13dbfd9ea68ea0:
+  only replace Apple RGB gain grid/tiles' colr with the generic Linear Gray ICC
+  Photos itself writes in IMG_2024; all HEVC configurations stay exact.
+- Color_2_Linear_Gray_SPS.HEIC, 11,597,446 bytes, SHA256
+  521f14d63d16325b17dffc8638e1ae116985098781475cfcda708e3e0797567c:
+  Color 1 plus only SPS transfer_characteristics 2 -> 8 on Apple HDR tiles,
+  matching the saved Photos data declaration 2/8/6. Original picture NALs and
+  every item payload remain exact; all other SPS fields are checked unchanged.
+
+These test the unresolved colour-data declaration hypothesis, not a confirmed
+fix. Physical View/Edit/Save colour and the saved result's HDR gain must be
+checked. No new production web/src changes, commit, push or rollout; 4dfac1e
+remains the previously selected release baseline.
+
+## 10.153 — Colour header probes rejected; original JPEG survives Photos editing (2026-10-20)
+
+The user reports Color 1 and Color 2 are visually the same and do not fix the
+HDR colour issue. Neither ICC-only nor ICC plus linear SPS signalling is an
+accepted correction. No production change is promoted.
+
+Correct the earlier causal inference: a scalar gain map in a rendered export
+does not alone prove a broken RGB edit. Photos may move chromatic adjustments
+into its re-rendered base. This was already a concern in 10.152, and requires a
+passing post-edit reference rather than classifying any gray gain as a bug.
+
+New device control: the user adjusts Exposure one step on the original
+IDG_20261019_201808_176.JPEG, without Stylio, and saves. Its HDR pharmacy-sign
+colour remains correct. This rules out a universal Photos HDR-editing failure
+on the device/source. It does not yet isolate JPEG vs HEIC container handling
+from the private Styles/Texture/Portrait editing path, or establish a particular
+gain-map equation/colour profile as the cause. Asked for the saved good original
+to compare with IMG_2024. Do not resume the stopped zoom investigation.
+
+## 10.154 — Passing Photos JPEG retains RGB ISO gain; ordered ISO/PQ probes (2026-10-20)
+
+The user supplies IDG_20261019_201808_176 (1).JPEG after increasing Exposure
+in Photos, and confirms its HDR colour remains correct. It is 2,800,797 bytes,
+SHA256 76a9ddd2d3af5f215997dd9c8cab00b4b52456de685d806073a5be3b910bb14b.
+The MPF contains a 4032x3024 Display-P3 base and a 2016x1512 three-component
+gain image. The gain JPEG carries ISO 21496-1 binary metadata rather than Adobe
+HDR XMP. Its 13,312-byte alternate ICC is Display-P3/PQ (cicp 12/16/0 full),
+with A2B0/B2A0 LUTs and no HAGC. This is an actual device-produced passing
+reference, not an inferred colour profile selected by appearance.
+
+ISO metadata has base headroom 0, alternate headroom 3 (8 linear), shared
+min 0/max 3/gamma 1, offsets approximately .005/.005, useBaseColorSpace false.
+ONE metadata parameter set does NOT imply a monochrome gain image: raw decoded
+U is non-neutral in 643,243/762,048 samples, V in 609,267/762,048 samples.
+This passing Photos JPEG therefore retains chromatic gain, whereas the failing
+IMG_2024 Apple HEIC render has neutral chroma in every HDR tile. It strengthens
+the ISO-vs-legacy route hypothesis but does not alone isolate container choice
+from the private Styles/Texture editing path, or prove the exact collapse stage.
+Do not copy this increased-Exposure file's gain parameters onto the original
+scene's unchanged gain samples; their equations/pixels differ.
+
+The current importer explicitly rejects this binary ISO JPEG with
+"HDR gain map missing from MPF"; it is NOT an SDR file. This unsupported import
+is recorded separately, not silently bypassed or presented as the colour fix.
+Private inventory helper: artifact/build/indigo-color-2024/photos-jpeg.mjs.
+
+Three ordered private probes start from the exact D production Portrait
+baseline. All encoded item payloads, original ISO metadata/gain equation,
+primary, source colour profile, Styles/Texture/depth and their references are
+asserted unchanged. No source pixels are transcoded, no saturation/headroom
+boost is applied, and no production files are changed:
+- Color_3_PQ_ICC.HEIC: only replace tmap output colr with the passing Photos
+  JPEG's alternate PQ ICC. 11,610,282 bytes, SHA256
+  d8effa3e8e9d09e6004aa2dd66189c7062349aedae9cebb0aeee411ece7aba58.
+- Color_4_ISO_RGB.HEIC: Color 3 minus only the separate Apple gain's auxC/auxl
+  role; retain original ISO RGB tmap and all payloads. 11,610,267 bytes, SHA256
+  6e8931a7086642bce8a335f22ebbaa97444ca1462d65b9bdb5ccb59fe8bf7110.
+- Color_5_ISO_RGB_10.HEIC: Color 4 plus only derived tmap pixi 16 -> 10 bits
+  per RGB component, matching measured native tmap bit declaration. Source
+  HEVC remains unchanged. 11,610,267 bytes, SHA256
+  cb3133e2308495371283b52d4aa3c2391dd41538e44a883f9e9066e39153a963.
+
+Generator artifact/build/indigo-color-2024/iso-rgb.mjs passes all payload,
+property/reference and worker read/discovery assertions. Those checks do NOT
+prove physical Photos HDR colour, controls or Edit/Save correctness. Device
+validation is pending. Earlier nclx-PQ, primary-tmap and linear-output pure-ISO
+probes were rejected; these probes test the newly supplied actual PQ ICC while
+keeping primary/preferred alternatives and gain equation unchanged. Neither
+earlier failures nor this local success are grounds to promote a runtime fix.
+
+## 10.155 — PQ/ISO probes rejected on device; minimize before further colour changes (2026-10-20)
+
+The user reports Color 3 still has the old colour problem, while Color 4 and
+Color 5 lose HDR entirely. Reject all three: the passing JPEG's alternate PQ
+ICC does not by itself fix the HEIC editor path; disabling the legacy Apple
+auxiliary loses working HDR even with that ICC and native-shaped tmap bit
+declaration. Do not promote any of these changes, or repeat the same ISO-only
+route with additional arbitrary colour headers.
+
+Next controlled device reduction is the already built Control_Bare_RGB_HDR:
+exact production H base, original ISO gain/tmap and separate Apple RGB gain,
+with all private editing resources removed and source JPEG Exif restored.
+11,410,637 bytes, SHA256
+0bc3e24cfb32022b523b85a0cb8b27cc8cbc92b8204f1388a1d30179b4a3c48e.
+There are deliberately no Styles/Texture/Portrait controls. Exposure Edit/Save
+is the test. A passing result separates the private editing contract from the
+RGB HEIC conversion as a whole; a failing result narrows it to the converted
+HDR representation or remaining container behaviour. This is a group reduction,
+not a one-field proof that a particular private metadata field is at fault.
+
+A possible correction to investigate only with explicit reconstruction checks:
+scalar Apple gain cannot carry independent chromatic amplification by itself.
+Simply replacing the RGB gain with its luminance, as earlier rejected mono
+probes did, discards that colour information. A scalar-compatible representation
+must solve a corresponding SDR base from the desired HDR RGB, not keep the old
+base unchanged. Such a representation deliberately changes SDR chromaticity;
+it must not be advertised as original-SDR preservation, and must also keep
+thumbnail/linear thumbnail and ISO/Apple equations consistent. It is not yet a
+production fix. No zoom work is resumed.
+
+## 10.156 — HDR-only control still fails; unify the actual gain input and equation (2026-10-20)
+
+The user tests Color 6 / Control_Bare_RGB_HDR and reports the same HDR colour
+error after an Exposure edit. Private Styles/Texture/Portrait are therefore
+not necessary to reproduce this failure. Stop changing their calibration or
+removing controls as a purported colour fix. The remaining reproducer includes
+the RGB HDR conversion/container path; the exact private Photos stage remains
+unobservable on Windows. The original edited JPEG still passes on the device.
+
+An equation-only scalar-rebasing feasibility check is kept in
+artifact/build/indigo-color-2024/scalar-reconstruction.mjs. On the existing
+decoded 2016x1512 baseline, rebuilding both the base and scalar gain can reduce
+linear HDR reconstruction MAE from .020708 to .000812. However it deliberately
+changes SDR hue: mean 2.34 code levels over the image, 5.32 in the green-wall
+ROI, and local changes up to 116 codes. Do NOT promote this as a faithful fix
+when the user says SDR already matches. No such photo candidate is served.
+This math check is not an emulation or acceptance test for Photos colour.
+
+Next falsifiable representation hypothesis: the accepted baseline exposes two
+different gain images/recipes. Its tmap consumes signed Adobe RGB gain 106,
+while the Apple auxiliary is separate normalized RGB grid 62. The native
+shared-gain relationship is absent for that normalized plane. Earlier shared
+RGB probes instead relabelled raw signed Adobe samples without making their
+Apple and ISO equations agree; their rejection does not test this correction.
+
+Private Color 7 keeps primary 49, Apple auxiliary 62 -> [49], all image payloads,
+profiles, headroom and private controls unchanged. Only tmap 102's dimg second
+input is changed 106 -> 62, together with the NECESSARILY corresponding ISO
+equation: one shared RGB parameter set min 0, max 3.257388, gamma 1, offsets 0,
+base headroom 0, alternate headroom 3.257388, useBaseColorSpace true. RGB image
+channels remain three; a single shared parameter set does not make them mono.
+The source signed gain and its original Adobe metadata remain untouched but
+are no longer the selected tmap input. This is one coherent representation
+change, not a one-field causal proof.
+
+Color 8 differs from Color 7 only by tmap colr: extended-linear P3 nclx becomes
+the passing Photos JPEG's generic P3/PQ ICC. Both keep the working Apple aux
+role, unlike rejected Color 4/5. No SDR rebasing or pixel re-encoding occurs.
+- Color_7_Shared_RGB.HEIC: 11,597,020 bytes, SHA256
+  15541d51d08093717058e5fc9194ff681b1542254842d64b55481a3f57871a49.
+- Color_8_Shared_RGB_PQ.HEIC: 11,610,344 bytes, SHA256
+  873aea1a56b395fc1a74bd7461907249b306058380a601f6d7e71260816f34a7.
+
+Generator artifact/build/indigo-color-2024/shared-normalized.mjs verifies every
+non-tmap payload and non-target property byte-exact, all non-tmap references
+exact, worker read/discovery success, and identical ISO-vs-Apple multipliers
+for all 9,144,576 actual decoded RGB gain samples (max error 1.78e-15).
+Those checks establish equation consistency and preservation, NOT physical
+Photos Edit/Save colour. Device results pending. Production remains unchanged.
+
+## 10.157 — Shared normalized RGB still fails; test a genuinely rebased scalar pair (2026-10-20)
+
+The user reports BOTH Color 7 and Color 8 still have the same HDR colour error.
+Reject them. Shared RGB input/equation consistency and the actual passing PQ
+ICC do not repair the physical Photos save result. Together with failing bare
+Color 6, this rules out private Styles/Texture as a necessary trigger and rejects
+the tested equation/topology/colour-header fixes. Do not state that the RGB
+contract is accepted merely because its local equations agree.
+
+One new candidate changes actual image data: Color_9_Rebased_Scalar.HEIC.
+Start from production Portrait baseline D. Reconstruct its accepted normalized
+RGB HDR scene at full 4032x3024, using bilinear sampling of its decoded 2016x1512
+RGB gain. For each pixel solve a shared scalar multiplier that preserves SDR
+luminance where representable, avoids base clipping, and stays within the same
+source-derived headroom 9.562501043. Encode that multiplier as normalized-log
+8-bit gray; then solve NEW SDR RGB = target HDR RGB / actual quantized multiplier.
+This keeps chromatic HDR information in the corresponding base instead of
+discarding it when making a gray gain. It is fundamentally different from the
+earlier mono-gain-only substitutions that kept the source SDR base unchanged.
+
+IMPORTANT TRADEOFF: SDR base pixels deliberately change hue to represent HDR
+colour through a scalar gain. Mean absolute SDR code change is 2.239/255 over
+the image, 1.844/255 in the pharmacy ROI, but local maximum changes are 122/255
+and 99/255 respectively. Do not describe that as uniformly tiny, original-SDR
+preservation, or a drop-in accepted fix. It is a private device feasibility
+probe; no production import/export path or original Native preservation changes.
+
+The gain is full-resolution 4032x3024 (48 lossless HEVC tiles), avoiding another
+unknown downsampling/Photos upsampling step. Grid 193 is the only Apple HDR aux,
+linked to primary 49, and the ISO second input of tmap 102. Its common ISO
+parameters match the Apple normalized-log equation. The original two gain
+resources/payloads remain as inactive data; original Apple gain 62 is demoted.
+All 48 primary tiles are re-encoded losslessly from the newly solved YUV420,
+with original base P3 ICC retained. Thumb 66 and Main10 P3-linear thumbnail 65
+are regenerated from the new base so old-colour previews are not left behind.
+Private Styles/Texture/Portrait/depth metadata and map payloads remain exact.
+
+Helpers are private, under artifact/build/indigo-color-2024/:
+scalar-pair.mjs, build-scalar-pair.mjs, verify-scalar-transport.mjs.
+The solver's floating reconstruction max error is 8.88e-16; after 8-bit base
+quantization HDR linear MAE is .000839 whole / .000633 pharmacy. Every encoded
+base and gray gain tile is decoded and checked YUV byte-exact. The unavoidable
+RGB/YUV420 conversion adds scene MAE .003837 whole / .002890 pharmacy; triangle
+upper bounds on total reconstruction MAE are .004676 / .003523. These are local
+representation checks, NOT a Photos renderer or a device acceptance oracle.
+The source HDR target is D's accepted pre-edit Apple RGB reconstruction, not a
+claim of exact recovery of the original JPEG's signed/offset ISO equation.
+
+Candidate is 24,973,113 bytes, SHA256
+bb3bcd3893f3cadf3c796039924ab37b7aaa597c898d48df15563dcf9a8addec.
+Worker read/discovery and compatibility checks pass; physical View/Edit/Save
+HDR colour, SDR appearance and private controls still need device validation.
+Do not commit/deploy the representation as a fix without those results.
+The user-stopped zoom investigation remains stopped.
+
+## 10.158 — Color 9 accepted; port to fresh RGB HDR JPEG exports (2026-10-20)
+
+The user reports Color 9 works and no longer has the colour bug. This is the
+physical acceptance for the reported HDR colour issue; do not reinterpret it
+as exact original-SDR equality, universal third-party compatibility, or a zoom
+repair. Preserve the explicit SDR rebasing tradeoff from 10.157.
+
+Production port is confined to importHdrJpeg when it has built an Apple RGB
+auxiliary. makeRgbHdrEditable reads that freshly generated file's own decoded
+SDR and normalized RGB gain, solves the same full-resolution scalar/base pair,
+re-encodes the primary and both thumbnails, and shares the new scalar gain
+between Apple and ISO readers. Native HEIC, ordinary SDR raster and the old
+single-channel HDR import routes do not call this correction. Geometry now
+reports the actual full-resolution gain. Private editing data stays intact;
+previous gain resources remain inactive source data.
+
+The runtime uses a generic D50 identity-TRC Linear Gray ICC generated from
+readable fields, rather than embedding the test photo's generic Apple profile
+bytes. Its transform is equivalent; its profile bytes/provenance differ. This
+distinction and physical acceptance of the prototype must not be hidden by
+claiming byte-identical output files. Numerical base and gain solver output
+DOES match every accepted Color 9 raw sample in the local private control.
+
+The first real browser integration exposed FFmpeg.wasm heap exhaustion during
+the long second encoding pass. Releasing only before decoding was insufficient:
+the next run failed at pair tile 41. The correction now releases the codec heap
+after full-frame conversions, after each 12 paired tiles, and before thumbnails.
+Encoded source data stays in JS; the next operation reloads pinned cached codec
+assets. This bounds codec lifetime without retrying with a lower quality image.
+
+Regression covers chromatic gain versus the old scalar-only failing control,
+black/neutral pixels and immutable inputs, generated gray ICC, exact accepted
+private raw samples, and actual buildRasterHeic -> scalar export -> Portrait /
+Texture graph propagation. The call-site test first failed on the fresh tmap's
+mdat storage: the private Portrait prototype had idat storage. The port now
+handles both methods correctly. Repeated correction on an already full-resolution
+scalar pair is byte-identical and performs no further encoding. Codec release
+boundaries are also exercised. PWA cache v232 includes both new runtime modules;
+the scalar export tests are required before CI/Pages publishing.
+
+No commit/push/deployment has been performed for this port. Real browser finish
+and output comparison are still in progress at this checkpoint.
+
+Port validation complete locally: 121 tests passed, 2 absent optional fixtures
+skipped, zero failed; PWA/paths/release/language checks pass. Real Bright and
+HDR-native preservation fixtures run and retain their historical byte-identical
+outputs. The actual browser JPEG import finishes in about 50 seconds for this
+12MP scene, producing 24,818,608 bytes, SHA256
+e7770f782891d785c0b6294c558420c0914c7fc7aff391d3bcfc636551e4c70a.
+It has primary 1, shared ISO/Apple full-resolution gain 187 with 48 tiles,
+Styles 97 and the matching scalar tmap equation. Source headroom uses the
+published XMP precision, avoiding ceil-boundary differences from an unwritten
+higher-precision JS value. Geometry reports 4032x3024 HDR rather than the old
+half-size source gain. A real Portrait-controller run with ImageBitmap failure
+forced also succeeds, retaining the 48-tile HDR pair plus depth and controls.
+
+Important comparison limit: matching the solver's accepted raw samples is NOT
+whole-file or final-pixel identity. FFmpeg.wasm and the native diagnostic's
+YUV->RGB readback differ by up to 2 code values (mean .815 for base / .894 gain).
+Changing unscaled conversion to accurate_rnd made chroma differences worse
+(max 37/57), so that experiment is rejected. Default full-size conversion is
+retained; area filtering is used only when resizing previews.
+Private compare-hdr-scenes.mjs compares actual reconstructed HDR rather than
+gain-code differences near black. Against accepted Color 9, the final app file
+has linear scene MAE .005968 whole / .004342 pharmacy, integrated luminance
+ratios 1.030586 / 1.037618, mean normalized RGB chroma L1 .018648 / .012161.
+These are measured representation differences, not evidence of renewed Photos
+save errors or proof that the runtime file passed a physical Edit/Save test.
+The runtime's generated equivalent gray ICC also differs from the prototype.
+The physical acceptance still applies to Color 9; the actual app-produced file
+is offered for the final device check. No commit/push/deployment yet.
+
+## 10.159 — Actual app-produced scalar HDR export accepted on iPhone (2026-10-20)
+
+The user replies "ok rồi" to the final check of App_Styles_Texture.HEIC, the
+actual browser output with SHA256
+e7770f782891d785c0b6294c558420c0914c7fc7aff391d3bcfc636551e4c70a.
+The question explicitly covers Photos Edit -> change Texture -> Done, retained
+HDR/correct pharmacy-sign colour, and working Styles/Texture. This accepts the
+production port, including its generated gray ICC and measured rounding/roughly
+3-4% higher HDR luminance versus the private Color 9 prototype. It supersedes
+the pending runtime-device acceptance in 10.158.
+
+Select this rebased scalar pair as the accepted fix for the reported Indigo RGB
+HDR colour/save issue. Retain the stated SDR chromaticity tradeoff, larger files
+and additional processing work. Native Bright/HDR preservation remains separately
+verified byte-for-byte. The stopped zoom investigation remains stopped; no claim
+is made that every third-party HDR format or capture has been device-validated.
+No earlier rejected colour/header/topology probes are promoted.

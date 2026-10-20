@@ -200,3 +200,26 @@ export function decodeHevcYuv(record,payload,{width,height},onProgress) {
   });
   serial=task;return task;
 }
+
+/** Numeric full-range HDR sample conversion; never apply an ICC or tone map. */
+export function convertHdrPixels(pixels,{width,height,from,to,outWidth=width,outHeight=height},onProgress){
+  const task=serial.catch(()=>{}).then(async()=>{
+    const sizes={yuv420p:1.5,rgb24:3,rgba:4};
+    if(!['yuv420p','rgb24'].includes(from)||!['yuv420p','rgb24','rgba'].includes(to)
+      ||![width,height,outWidth,outHeight].every(n=>Number.isInteger(n)&&n>=2&&n<=8192&&n%2===0)
+      ||pixels.byteLength!==width*height*sizes[from])throw Error('Invalid HDR sample conversion');
+    await ensureHevcEncoder(onProgress);const input=new Uint8Array(pixels.buffer,pixels.byteOffset,pixels.byteLength).slice();
+    // Keep the accepted full-size colour conversion's default chroma filter.
+    // Area filtering is only for resized thumbnails, not gain/base readback.
+    const size=outWidth===width&&outHeight===height?'':`${outWidth}:${outHeight}:flags=area:`;
+    const filter=from==='yuv420p'?`scale=${size}in_range=full:out_range=full:in_color_matrix=bt601`
+      :to==='yuv420p'?`scale=${size}out_color_matrix=bt601:out_range=full`:
+        `scale=${outWidth}:${outHeight}:flags=area`;
+    const args=['-hide_banner','-threads','1','-filter_threads','1','-f','rawvideo','-pix_fmt',from,
+      ...(from==='yuv420p'?['-color_range','pc']:[]),'-s',`${width}x${height}`,'-i','input.raw',
+      '-frames:v','1','-vf',filter,'-color_range','pc','-pix_fmt',to,'-f','rawvideo','output.raw'];
+    const output=await request({operation:'decode',pixels:input,args},[input.buffer]);
+    if(output.length!==outWidth*outHeight*sizes[to])throw Error('HDR sample conversion dimensions disagree');
+    return output;
+  });serial=task;return task;
+}
