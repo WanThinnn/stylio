@@ -8,7 +8,7 @@ import {generateSyntheticHevc} from '../../web/src/raster/synthetic-hevc.js';
 import {buildGeneratedProfile} from '../../web/src/raster/generated-profile.js';
 import {discoverHeic,extractItemData,propertyBoxBytes,auxUriForItem,DEPTH_URI,dimensionsForItem,itemOrientation,appendIpcoProperty,setItemPropertyAssociations,removeItems,addItems,replaceItemPropertyWithSource} from '../../web/src/raster/heif.js';
 import {hasTexture} from '../../web/src/raster/texture.js';
-import {extractAppleMakerNoteTag,injectAppleMakerNoteTag,exifCameraModel,getMakerNoteBlob} from '../../web/src/core/exif.js';
+import {extractAppleMakerNoteTag,injectAppleMakerNoteTag,exifCameraModel,getMakerNoteBlob,listAppleMakerNoteTags} from '../../web/src/core/exif.js';
 import {parseBplist,buildBplist,BplistReal} from '../../web/src/core/bplist.js';
 import {rebuildHeic} from '../../web/src/styles/graft.js';
 import {topBox,concat,be,box} from '../../web/src/core/box.js';
@@ -23,7 +23,8 @@ import {encodeTmapMetadata,parseTmapMetadata} from '../../web/src/raster/jpeg-hd
 import {registerTmapHdr,editableTmapHeadroom,normalizeAppleLegacyGainSamples,
   normalizeLegacyPortraitHdrGain,promoteLegacyPortraitHdr} from '../../web/src/styles/hdr-compatibility.js';
 import {executeJob} from '../../web/src/media/heic-worker.js';
-import {appleDepthAuxc} from '../../web/src/portrait/apple-depth-metadata.js';
+import {appleDepthAuxc,readAppleDepthRange} from '../../web/src/portrait/apple-depth-metadata.js';
+import {matchPortraitHdrCapacity,portraitSourceHeadroom} from '../../web/src/portrait/portrait-hdr-calibration.js';
 const template=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
 const fixture=JSON.parse(fs.readFileSync(new URL('./raster-hevc.fixture.json',import.meta.url)));
 const assets=await generateSyntheticHevc(null,async(_,o)=>{
@@ -56,6 +57,155 @@ function photo(width,height,name='48-12'){
     thumb:payload,thumbHvcc:codec,hdr:payload,hdrHvcc:codec},null,null,g);
 }
 const depth={payload:assets.mask.payload,hvcc:assets.mask.hvcc,width:64,height:64};
+
+test('AI Portrait geometry follows its stored source grid instead of the reference camera lens',()=>{
+  for(const [iw,ih]of [[900,600],[3024,4032],[1200,1200]]){
+    const source=photo(iw,ih),before=discoverHeic(source),[w,h]=dimensionsForItem(before.props,before.primary);
+    const output=buildAiPortrait(source,depth,template),d=discoverHeic(output.data);
+    const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
+    const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+    const xmp=new TextDecoder().decode(extractItemData(output.data,d,side));
+    assert.match(xmp,new RegExp('IntrinsicMatrixReferenceWidth>'+w+'<'));
+    assert.match(xmp,new RegExp('IntrinsicMatrixReferenceHeight>'+h+'<'));
+    const seq=name=>[...xmp.match(new RegExp('<depthData:'+name+'>([\\s\\S]+?)</depthData:'+name+'>'))[1].matchAll(/<rdf:li>([^<]+)</g)].map(m=>Number(m[1]));
+    assert.deepEqual(seq('LensDistortionCoefficients'),Array(8).fill(0),'AI samples already align with decoded source pixels, not the donor lens');
+    assert.deepEqual(seq('InverseLensDistortionCoefficients'),Array(8).fill(0));
+    const matrix=seq('IntrinsicMatrix');
+    assert.equal(matrix[6],(w-1)/2);assert.equal(matrix[7],(h-1)/2);
+    assert.match(xmp,/<depthData:Quality>high<\/depthData:Quality>/,'keep the device-accepted Photos aperture eligibility declaration');
+    assert.equal(output.report.referenceCalibration,false);
+    assert.equal(output.report.geometry,'relative-image-grid');
+  }
+});
+
+test('Portrait HDR metadata update preserves all renderer fields outside the native capacity vector',()=>{
+  const source=template.depthXmp,changed=matchPortraitHdrCapacity(source,3.472317);
+  const render=xmp=>Buffer.from(/<depthBlurEffect:RenderingParameters>([^<]+)/.exec(xmp)[1],'base64');
+  const before=render(source),after=render(changed);
+  assert.equal(source.replace(/(<depthBlurEffect:RenderingParameters>)[^<]+/,'$1'),changed.replace(/(<depthBlurEffect:RenderingParameters>)[^<]+/,'$1'));
+  assert.deepEqual(before.subarray(0,16),after.subarray(0,16));
+  for(let p=16;p<before.length;p+=8){
+    const id=before.readUInt16LE(p);
+    assert.deepEqual(before.subarray(p,p+4),after.subarray(p,p+4));
+    if(![450,451,452,453].includes(id))assert.deepEqual(before.subarray(p,p+8),after.subarray(p,p+8),'unrelated renderer field '+id);
+    if(id===453)assert.ok(Math.abs(after.readFloatLE(p+4)-3.472317)<1e-6);
+  }
+  assert.equal(matchPortraitHdrCapacity(changed,3.472317),changed);
+  assert.equal(matchPortraitHdrCapacity(source,null),source);
+  assert.throws(()=>matchPortraitHdrCapacity(source,NaN),/Invalid/);
+  const corrupt=Buffer.from(before);corrupt.writeUInt32LE(99,4);
+  assert.throws(()=>matchPortraitHdrCapacity(source.replace(before.toString('base64'),corrupt.toString('base64')),3),/Unsupported/);
+});
+
+const nativeBokehControl=new URL('../private-fixtures/bokeh-highlight-error/IMG_0953_native_org.HEIC',import.meta.url);
+test('native camera Portrait capacity already matches its own HDR declaration and stays byte-identical',{
+  skip:!fs.existsSync(nativeBokehControl),
+},()=>{
+  const b=new Uint8Array(fs.readFileSync(nativeBokehControl)),d=discoverHeic(b);
+  const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
+  const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+  const xmp=new TextDecoder().decode(extractItemData(b,d,side));
+  assert.equal(matchPortraitHdrCapacity(xmp,portraitSourceHeadroom(b,d)),xmp);
+});
+
+test('optional Portrait preserves source HDR capture calibration outside its feature flags',()=>{
+  const base=withCamera(photo(900,600),'iPhone 16 Pro'),d=discoverHeic(base),ft=topBox(base,'ftyp');
+  let exif=extractItemData(base,d,d.exifItem);
+  exif=injectAppleMakerNoteTag(exif,be(17,4),1,9);
+  const mn=getMakerNoteBlob(exif),view=new DataView(mn.buffer,mn.byteOffset,mn.byteLength),little=mn[12]===73;
+  for(let n=0;n<view.getUint16(14,little);n++){const p=16+n*12;if(view.getUint16(p,little)===1)view.setUint32(p+4,1,little);}
+  const calibration=new Map([[0x2,Uint8Array.of(71,91,23,12)],
+    [0x4e,buildBplist(new Map([['capture-statistic',new BplistReal(.4123)]]))],
+    [0x5a,buildBplist(new Map([['0',1],['1',new BplistReal(.034)],['4',new BplistReal(.79)]]))],
+    [0x123,Uint8Array.of(19,17,11,3)]]);
+  for(const [id,payload]of calibration)exif=injectAppleMakerNoteTag(exif,payload,id,7);
+  const sourceHeadroom=3.472317;
+  let meta=base.slice(d.meta.off,d.meta.off+d.meta.size),side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(d.hdrGrid)&&d.infos.get(r.from)?.type==='mime')?.from;
+  if(side===undefined){let ids;[meta,ids]=addItems(meta,[{key:'hdr-source',itemType:'mime',contentType:'application/rdf+xml',refType:'cdsc',refTo:[d.hdrGrid]}]);side=ids.get('hdr-source');}
+  const source=rebuildHeic(base,d,base.slice(0,ft.size),meta,new Map([[d.exifItem,exif],
+    [side,new TextEncoder().encode(`<HDRGainMap:HDRGainMapHeadroom>${sourceHeadroom}</HDRGainMap:HDRGainMapHeadroom>`)]]));
+  const output=buildAiPortrait(source,depth,template).data,after=discoverHeic(output);
+  assert.equal(after.primary,d.primary,'native primary ID stays in its own graph');
+  const before=discoverHeic(source);
+  for(const id of before.infos.keys())if(id!==before.exifItem){
+    assert.deepEqual(extractItemData(output,after,id),extractItemData(source,before,id),'native resource '+id);
+    for(const type of ['ispe','hvcC','colr','auxC','irot','imir'])
+      assert.deepEqual(propertyBoxBytes(output,after.props,id,type),propertyBoxBytes(source,before.props,id,type),'native property '+id+'/'+type);
+    assert.deepEqual(after.refs.filter(r=>r.from===id),before.refs.filter(r=>r.from===id),'native references '+id);
+  }
+  const actual=extractItemData(output,after,after.exifItem);
+  const depthId=[...after.infos.keys()].find(id=>auxUriForItem(after.props,id)===DEPTH_URI);
+  const depthSide=after.refs.find(r=>r.type==='cdsc'&&r.to.includes(depthId)).from;
+  const xmp=new TextDecoder().decode(extractItemData(output,after,depthSide)),rend=Buffer.from(/<depthBlurEffect:RenderingParameters>([^<]+)/.exec(xmp)[1],'base64');
+  let declared;
+  for(let p=16;p<rend.length;p+=8)if(rend.readUInt16LE(p)===453)declared=rend.readFloatLE(p+4);
+  assert.ok(Math.abs(declared-sourceHeadroom)<1e-6,'Portrait renderer must declare this photo HDR capacity, not template capacity');
+  for(const [id,payload]of calibration)
+    assert.deepEqual(extractAppleMakerNoteTag(actual,id).payload,payload,'capture calibration 0x'+id.toString(16));
+  const flags=new Map(listAppleMakerNoteTags(actual).map(t=>[t.tag,t]));
+  for(const [id,value]of [[0x14,12],[0x1f,1]]){
+    assert.equal(flags.get(id).payload.length,4,'one LONG, not four LONGs');
+    assert.equal(new DataView(flags.get(id).payload.buffer).getUint32(0,little),value);
+  }
+});
+
+test('modern native Portrait adds only the accepted viewer bit without losing unrelated processing flags',()=>{
+  for(const flags of [0,0x222002,0x222022,0x80000040]){
+    const base=withCamera(photo(900,600),'iPhone 16 Pro'),d=discoverHeic(base),ft=topBox(base,'ftyp');
+    let exif=extractItemData(base,d,d.exifItem);
+    for(const [id,value]of [[1,17],[0x19,flags]])exif=injectAppleMakerNoteTag(exif,be(value,4),id,9);
+    const mn=getMakerNoteBlob(exif),v=new DataView(mn.buffer,mn.byteOffset,mn.byteLength),le=mn[12]===73;
+    for(let n=0;n<v.getUint16(14,le);n++){
+      const at=16+n*12;if([1,0x19].includes(v.getUint16(at,le)))v.setUint32(at+4,1,le);
+    }
+    const source=rebuildHeic(base,d,base.slice(ft.off,ft.off+ft.size),base.slice(d.meta.off,d.meta.off+d.meta.size),new Map([[d.exifItem,exif]]));
+    const saved=source.slice(),output=buildAiPortrait(source,depth,template).data,after=discoverHeic(output);
+    const own=extractItemData(output,after,after.exifItem),actual=extractAppleMakerNoteTag(own,0x19);
+    assert.equal(actual.payload.length,4);assert.equal(actual.type,9);
+    assert.equal(new DataView(actual.payload.buffer,actual.payload.byteOffset,4).getUint32(0,le),(flags|0x20)>>>0);
+    for(const tag of listAppleMakerNoteTags(exif))if(![0x14,0x1f,0x19].includes(tag.tag))
+      assert.deepEqual(extractAppleMakerNoteTag(own,tag.tag),{type:tag.type,payload:tag.payload});
+    assert.deepEqual(source,saved,'the input remains immutable');
+  }
+});
+
+test('iPhone-model raster metadata without a camera MakerNote retains the accepted generated Portrait contract',()=>{
+  const base=photo(900,600),tagged=withCamera(base,'iPhone 16 Pro');
+  const maker=source=>{const d=discoverHeic(source);return getMakerNoteBlob(extractItemData(source,d,d.exifItem));};
+  assert.deepEqual(maker(buildAiPortrait(tagged,depth,template).data),maker(buildAiPortrait(base,depth,template).data));
+});
+
+const nativeHdrDirectory=new URL('../private-fixtures/native-hdr-2059/',import.meta.url);
+for(const name of ['IMG_2059_native.HEIC','IMG_2061_native.HEIC'])test('reported '+name+' keeps every capture MakerNote field through Texture and Portrait',{
+  skip:!fs.existsSync(new URL(name,nativeHdrDirectory)),
+},async()=>{
+  const original=new Uint8Array(fs.readFileSync(new URL(name,nativeHdrDirectory))),before=discoverHeic(original);
+  const textured=(await executeJob({operation:'texture',data:original,opts:{preserveStyles:true}})).data;
+  const built=buildAiPortrait(textured,depth,template),output=built.data,after=discoverHeic(output);
+  assert.equal(built.report.nativeGraphPreserved,true);
+  assert.equal(after.primary,before.primary);assert.equal(after.hdrGrid,before.hdrGrid);assert.equal(after.stylesItem,before.stylesItem);
+  const ft=topBox(original,'ftyp');assert.deepEqual(output.slice(0,ft.size),original.slice(0,ft.size));
+  for(const id of before.infos.keys())if(id!==before.exifItem){
+    assert.deepEqual(extractItemData(output,after,id),extractItemData(original,before,id),'original item '+id);
+    assert.deepEqual(after.refs.filter(r=>r.from===id),before.refs.filter(r=>r.from===id),'original refs '+id);
+    const properties=(bytes,d)=>(d.props.associations.get(id)||[]).map(a=>{
+      const p=d.props.properties[a.index-1];return [a.essential,bytes.slice(p.box.off,p.box.off+p.box.size)];
+    });
+    assert.deepEqual(properties(output,after),properties(original,before),'original properties '+id);
+  }
+  const expected=listAppleMakerNoteTags(extractItemData(original,before,before.exifItem));
+  const actual=new Map(listAppleMakerNoteTags(extractItemData(output,after,after.exifItem)).map(t=>[t.tag,t]));
+  for(const tag of expected){
+    if([0x14,0x1f].includes(tag.tag))continue; // Portrait capability/capture class contract.
+    if(tag.tag===0x19){
+      const a=actual.get(tag.tag),le=getMakerNoteBlob(extractItemData(original,before,before.exifItem))[12]===73;
+      assert.equal(a.type,tag.type);assert.equal(a.payload.length,4);
+      const uint=t=>new DataView(t.payload.buffer,t.payload.byteOffset,4).getUint32(0,le);
+      assert.equal(uint(a),(uint(tag)|0x20)>>>0);continue;
+    }
+    assert.deepEqual(actual.get(tag.tag),tag,'capture MakerNote 0x'+tag.tag.toString(16));
+  }
+});
 test('generated F disparity range is consistent in auxC and XMP across focus/aperture updates',()=>{
   const source=photo(900,600),scaled={...depth,floatMax:.75};
   for(const settings of [{},{focusX:.2,focusY:.7,aperture:2.8}]){
@@ -179,13 +329,85 @@ test('native restoration preserves camera disparity range and exact auxC, not th
     assert.deepEqual(propertyBoxBytes(output.data,after.props,id,'auxC'),propertyBoxBytes(source,before.props,oldId,'auxC'));
     const side=after.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)&&after.infos.get(r.from)?.type==='mime');
     const xmp=new TextDecoder().decode(extractItemData(output.data,after,side.from));
-    assert.ok(xmp.includes(`<apdi:FloatMinValue>${floatMin}</apdi:FloatMinValue>`));
-    assert.ok(xmp.includes(`<apdi:FloatMaxValue>${floatMax}</apdi:FloatMaxValue>`));
+    assert.deepEqual(readAppleDepthRange(xmp),{floatMin,floatMax});
     assert.deepEqual(extractItemData(output.data,after,id),extractItemData(source,before,oldId));
     assert.deepEqual(extractItemData(output.data,after,after.stylesItem),extractItemData(source,before,before.stylesItem));
     before.primaryTiles.forEach((key,i)=>assert.deepEqual(extractItemData(output.data,after,after.primaryTiles[i]),extractItemData(source,before,key)));
     assert.deepEqual(source,saved);
   }
+});
+
+test('native restoration retains source camera calibration and unknown depth fields instead of the reference lens',async()=>{
+  const base=capture(attachAiDepth(photo(900,600),{...depth,floatMin:.1,floatMax:2}),10,0),d=discoverHeic(base),ft=topBox(base,'ftyp');
+  const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI),side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+  const camera='<depth:IntrinsicMatrixReferenceWidth>1800</depth:IntrinsicMatrixReferenceWidth><depth:IntrinsicMatrixReferenceHeight>1200</depth:IntrinsicMatrixReferenceHeight><depth:PixelSize>0.001</depth:PixelSize><depth:IntrinsicMatrix><rdf:Seq><rdf:li>2718.28</rdf:li><rdf:li>0</rdf:li><rdf:li>0</rdf:li><rdf:li>0</rdf:li><rdf:li>2718.28</rdf:li><rdf:li>0</rdf:li><rdf:li>900</rdf:li><rdf:li>600</rdf:li><rdf:li>1</rdf:li></rdf:Seq></depth:IntrinsicMatrix><depth:FutureCameraField>own-camera-calibration</depth:FutureCameraField>';
+  const xmp=new TextDecoder().decode(extractItemData(base,d,side)).replace('</rdf:Description>',camera+'</rdf:Description>');
+  const source=rebuildHeic(base,d,base.slice(ft.off,ft.off+ft.size),base.slice(d.meta.off,d.meta.off+d.meta.size),new Map([[side,new TextEncoder().encode(xmp)]]));
+  const output=await restoreNativePortrait(source,template,{unblurredBase:true}),after=discoverHeic(output.data);
+  const nid=[...after.infos.keys()].find(id=>auxUriForItem(after.props,id)===DEPTH_URI),ns=after.refs.find(r=>r.type==='cdsc'&&r.to.includes(nid)).from;
+  const result=new TextDecoder().decode(extractItemData(output.data,after,ns));
+  assert.ok(result.includes(camera));assert.ok(result.includes('depthBlurEffect:RenderingParameters'));
+  assert.ok(result.includes('<depth:Quality>low</depth:Quality>'),'native source quality is retained independently of the AI editing profile');
+  assert.equal(output.report.geometry,'native-depth-calibration');
+  assert.ok(!result.includes('5676.125'),'no reference intrinsic matrix');
+});
+
+test('native depth without camera optics keeps the accepted restoration profile rather than incomplete calibration',async()=>{
+  const source=capture(attachAiDepth(photo(900,600),{...depth,floatMin:.1,floatMax:2}),10,0);
+  const output=await restoreNativePortrait(source,template,{unblurredBase:true}),d=discoverHeic(output.data);
+  const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI),side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+  const xmp=new TextDecoder().decode(extractItemData(output.data,d,side));
+  assert.equal(output.report.geometry,'reference-native-depth-fallback');assert.equal(output.report.referenceCalibration,true);
+  assert.ok(xmp.includes('5676.125'));assert.deepEqual(readAppleDepthRange(xmp),{floatMin:.1,floatMax:2});
+});
+
+const acceptedJ4=new URL('../private-fixtures/native-portrait-strength-2082/J4_AI_Quality.HEIC',import.meta.url);
+const acceptedJ4Source=new URL('../private-fixtures/native-portrait-strength-2082/IMG_2081.HEIC',import.meta.url);
+const acceptedN1=new URL('../private-fixtures/native-portrait-strength-2082/N1_Viewer_Bit20.HEIC',import.meta.url);
+test('generated response and viewer metadata reproduce the device-accepted N1 active graph',{
+  skip:!fs.existsSync(acceptedN1)||!fs.existsSync(acceptedJ4Source),
+},async()=>{
+  const {addTexture}=await import('../../web/src/styles/texture.js');
+  const reference=new Uint8Array(fs.readFileSync(acceptedN1)),d=discoverHeic(reference);
+  const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI),[width,height]=dimensionsForItem(d.props,id);
+  const source=addTexture(new Uint8Array(fs.readFileSync(acceptedJ4Source)),{preserveStyles:true}).data;
+  const output=buildAiPortrait(source,{width,height,payload:extractItemData(reference,d,id),
+    hvcc:propertyBoxBytes(reference,d.props,id,'hvcC'),floatMax:3,relativeResponse:'projection-v1'},template,{aperture:1.4});
+  const after=discoverHeic(output.data);
+  for(const item of d.infos.keys()){
+    const actual=extractItemData(output.data,after,item),expected=extractItemData(reference,d,item);
+    assert.equal(Buffer.compare(actual,expected),0,'device-accepted N1 resource '+item);
+    const properties=(bytes,graph)=>(graph.props.associations.get(item)||[]).map(a=>{
+      const p=graph.props.properties[a.index-1];return [a.essential,bytes.slice(p.box.off,p.box.off+p.box.size)];
+    });
+    assert.deepEqual(properties(output.data,after),properties(reference,d),'device-accepted N1 properties '+item);
+  }
+  assert.deepEqual(after.refs,d.refs);
+  assert.ok(Math.abs(output.report.disparityMax-12.469766884405981)<1e-9);
+});
+test('real AI assembly retains J4 editing resources with only the accepted viewer-word addition',{
+  skip:!fs.existsSync(acceptedJ4)||!fs.existsSync(acceptedJ4Source),
+},async()=>{
+  const {addTexture}=await import('../../web/src/styles/texture.js');
+  const reference=new Uint8Array(fs.readFileSync(acceptedJ4)),d=discoverHeic(reference);
+  const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI),[width,height]=dimensionsForItem(d.props,id);
+  const source=addTexture(new Uint8Array(fs.readFileSync(acceptedJ4Source)),{preserveStyles:true}).data;
+  const output=buildAiPortrait(source,{width,height,payload:extractItemData(reference,d,id),
+    hvcc:propertyBoxBytes(reference,d.props,id,'hvcC'),floatMax:3},template,{aperture:1.4});
+  const after=discoverHeic(output.data);
+  for(const item of d.infos.keys()){
+    const expected=extractItemData(reference,d,item).slice();
+    if(item===d.exifItem){
+      const mn=getMakerNoteBlob(expected),v=new DataView(mn.buffer,mn.byteOffset,mn.byteLength),le=mn[12]===73;
+      for(let n=0;n<v.getUint16(14,le);n++){
+        const at=16+n*12;if(v.getUint16(at,le)===0x19)v.setUint32(at+8,(v.getUint32(at+8,le)|0x20)>>>0,le);
+      }
+    }
+    assert.deepEqual(extractItemData(output.data,after,item),expected,'active J4 item '+item);
+  }
+  assert.deepEqual(after.refs,d.refs);
+  // J4's patched XMP left an unused old extent. Whole-file identity is neither
+  // expected nor a substitute for the on-device observation recorded in facts.
 });
 
 test('native restoration refuses missing, ambiguous or invalid disparity ranges instead of guessing 0..1',async()=>{

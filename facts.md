@@ -6352,3 +6352,472 @@ Release authorization: the user subsequently replies "ok" and explicitly asks
 to put this packing change into production. Proceed with master commit/push and
 verify the Pages deployment for that exact commit. This is release approval;
 the short reply does not independently document a detailed new iPhone test.
+
+## 10.161 — Native HDR preservation: Portrait overwrites capture MakerNote (2026-10-20)
+
+User reports a small HDR brightness difference for native iPhone 16 Pro photos,
+while SDR matches. Private pairs copied from Downloads/iCloud Photos/iCloud Photos
+to tests/private-fixtures/native-hdr-2059/: 2059_native/2060_stylio (12MP) and
+2061_native/2062_stylio (24MP). Comparing by graph role (NOT raw item IDs, which
+Portrait remaps), every original non-Exif payload is found byte-identical in the
+reported output, including primary/gain/delta tiles, thumbnails, tmap equation,
+HDR ICC and Styles. Both reported outputs also contain generated 1024x768 depth.
+
+Replaying Texture -> buildAiPortrait with the depth from each reported output
+reproduces EVERY active MakerNote field in that output. The Texture-only file
+processor, with optional AI presentation stubbed out, keeps camera Exif intact.
+The loss is at makerBlob in the optional Portrait stage: it replaces the whole
+camera MakerNote with template observations, retaining only 0x54, 0x11, 0x21 and
+0x30. In particular 0x1 changes 17->16, scene fields/plists 0x2/0x4e/0x5a change,
+and several unknown camera records disappear. This proves a source-ownership bug;
+the specific cause of the visible few-percent Photos difference is not yet proven
+by byte comparisons. Do not call a field-specific HDR brightness theory measured.
+
+Git blame places the template substitution in a438f965 (2026-10-09), with later
+identity/headroom safeguards. It was NOT introduced by 75af92d's RGB HDR JPEG
+packing: the fresh JPEG compactor is not called on this native route.
+
+The user asks to compare local ref/Shalielie (f95f832). Directly running its
+web/src/texture.js addTexture on BOTH private inputs produces WHOLE FILES identical
+to our current addTexture(...,{preserveStyles:true}): 2,443,939 and 3,453,732 bytes.
+Reference web/app.js:109-116 stops at this route for native Styles; it does not
+generate depth or adopt the Portrait template. This verifies Texture preservation
+equivalence on these samples, not universal display parity for all reference files.
+Do not replace the working Texture writer or remove requested Portrait features.
+
+Candidate fix in ai-portrait-export.js: for a source with iPhone model plus a full
+camera MakerNote version entry (tag 1, signed LONG), preserve the entire source
+MakerNote and its endian order. Only Portrait capture class 0x14=12 and feature
+flag 0x1f=1 are inserted/updated, each with count 1. Unknown records, capture
+statistics/plists, identity and HDR metadata remain source-owned. Generated
+raster Exif without that camera version retains the previously accepted template
+route; camera model alone is insufficient (Indigo may retain an iPhone model).
+
+Three regression tests first failed at the actual Portrait seam (public synthetic
+calibration and both private native captures), then pass after the fix. Related
+98 tests pass, including native Bright/HDR byte-identical controls and scalar
+Indigo HDR/Portrait integration. A further generated-raster guard checks that an
+iPhone model without camera MakerNote does not switch the accepted contract.
+PWA cache v234; no change to image codecs, gain maps or Texture data.
+
+Private Fixed_Portrait files reuse each reported output's actual depth with its
+0..0.75 range, keeping refs and every NON-EXIF payload identical to that reported
+output. 2059 fixed: 2,579,341 bytes, SHA256
+efbd62e6cc74b559cbe4239cc12c28ee8333fded2d9226870a0d8b7bcec23ca5.
+2061 fixed: 3,550,068 bytes, SHA256
+2f026747c098cd5671cbc2b9c0115a18aac4c574891ed83e9ca1d97b938b7074.
+Matching reference Texture-only outputs are retained as controls. Physical Photos
+HDR brightness, Edit/Save and Portrait control acceptance is pending. No commit,
+push or production deployment of this candidate yet.
+
+## 10.162 — Metadata-only candidate does not close HDR delta; native graph trial and weak AI blur (2026-10-20)
+
+Device feedback: the Fixed_Portrait candidates in 10.161 still show slightly less
+HDR than Shalielie; Texture-only controls match. The source-MakerNote preservation
+bug is real, but its repair does NOT prove a repair for the visible HDR delta.
+The user also turns Portrait off in Photos, saves, reopens and still sees lower
+HDR. Do not describe the difference as merely an active blur highlight effect.
+
+User supplies IMG_2082_native / IMG_2083_stylio in Downloads/iCloud Photos (1)/
+iCloud Photos, both after Photos export, and sharp pre-Stylio IMG_2081.HEIC.
+All are copied to tests/private-fixtures/native-portrait-strength-2082/. The two
+comparison exports no longer contain the Styles graph or original REND/focus XMP;
+this does not establish loss of asset-side Photos controls. Decoded primary SDR
+previews independently show much stronger native background and foreground blur.
+2081 retains complete camera Styles/HDR and has no depth. Rebuilding from the
+already-blurred primary in 2083 would be an invalid/double-blur comparison.
+
+Native 2082 depth is 576x768, declared .297363..10.179688. Stylio 2083 is 768x1024,
+declared 0...75. Region medians in declared disparity units (not measured metres):
+controller 3.6302 vs .50588; far background .60740 vs .09412; receipt foreground
+5.2579 vs .62353. Far/background separation is ~7.34 times smaller in Stylio.
+This is not proof that multiplying AI disparity by 7.34 gives native blur in all
+regions. The window region is estimated much too near by AI, and the production
+sqrt curve intentionally compresses near-side differences. Native and AI maps
+are different and no per-photo metric calibration follows from their extrema.
+Do not replace AI_DISPARITY_MAX=.75 globally or copy this photo's camera range.
+
+An additional preservation test first fails at buildAiPortrait: a native camera
+primary is remapped to template ID 49 instead of retaining its own ID. All native
+pixels can match while opaque Apple records may still refer to original IDs.
+Candidate implementation now appends depth, its REND/XMP and focus metadata to
+the modern (iPhone 16+) full-camera-MakerNote Styles graph rather than adopting
+the template layout. Original IDs, brands, groups, references and properties
+remain; camera Exif only receives the two documented Portrait feature fields.
+Generated raster/non-camera and older restoration keep the existing builder.
+This is a stronger source-ownership invariant, NOT a measured Photos HDR fix yet.
+The source-graph regression and 91 related tests pass; it includes the real
+Bright/HDR controls and independent Indigo scalar/Portrait checks.
+
+Four private trials created by artifact/build/native-portrait-strength-2082/build.mjs:
+A_HDR_NativeGraph uses 2059 and its actual original 2060 depth at .75/f4.5.
+B_Blur_Control075, C_Blur_Range300, D_Blur_Range600 use sharp 2081 and the SAME
+measured AI depth from 2083, restored from display to source orientation without
+resampling and losslessly encoded (decoded samples verified byte-identical).
+They use f1.4 and maxima .75 / 3 / 6 respectively. Only declared range differs
+between B/C/D (auxC and matching XMP); aperture, RGB/HDR/Styles/Texture and depth
+samples are identical. Range trials are diagnostic, not a new global calibration.
+All candidates verify every existing non-Exif source payload/property/reference
+and ftyp byte-identical, with no camera-matrix or source-gain replacement.
+Candidate hashes/sizes are in the ignored private candidates.json manifest.
+Pending device check: A HDR plus Styles/Texture/Portrait; B/C/D at the same subject
+focus and aperture versus native 2082. No commit/push/deployment of these changes.
+
+## 10.163 — Portrait highlight clipping, source HDR capacity missing from REND (2026-10-20)
+
+The user changes Wi-Fi and asks to update the download link, then supplies four
+files under Downloads/bokeh-highlight-error. They report switching Portrait ON
+clips the blue/green light strip even in SDR at f16, worse at f1.4. Files are
+copied privately to tests/private-fixtures/bokeh-highlight-error/. Native/stylio
+_org exports have sharp full Styles/REND/depth graphs (Portrait OFF); the shorter
+native/stylio exports are the Photos-rendered Portrait ON versions. Do not confuse
+the native OFF file's existing camera depth with AI or double-blur an ON primary.
+
+Decoded SDR primary PNGs independently show the Stylio strip becoming near-white,
+while the native rendered strip retains green. At 756x1008, normalized ROI
+x=.02..45,y=.14..24, the near-white threshold R>=235,G>=245,B>=235 counts 0/32926
+native vs 1287/32926 Stylio pixels (3.9088%). The photos are neighboring captures,
+so this measures the reported symptom; it is not a registered pixel identity
+comparison or an HDR display simulation. Report is private highlight-primary-report.json.
+
+Important metadata evidence: the two OFF files have v7 REND blobs of 1352 bytes,
+167 fixed 8-byte records after the 16-byte header. Only eight records differ:
+400..403 (optical/blur scaling) and 450..453. Native record 453 float=3.48173094,
+matching its own source HDRGainMapHeadroom=3.481731. Stylio record 453 stays at
+2.31366849 from the Portrait template, while its own headroom is 3.472317.
+Records 450..452 are also a proportional capacity vector in the control. This
+supports a falsifiable metadata-consistency hypothesis, not a proven cause of
+every clipping case or publicly documented semantics for all private REND IDs.
+
+The new native-graph Portrait candidate now reads source-owned HDR capacity from
+the gain sidecar (or unambiguous tmap capacity, independent of gain gamma/minimum),
+and updates the known v7 450..453 vector. It preserves the reference optical scale
+and every other renderer field, not the neighboring photo's capture values.
+Ambiguous declarations or unsupported renderer layouts are rejected; absent
+capacity leaves the previous template unchanged. Correction is confined to the
+modern camera native-graph branch. Accepted generated Indigo exports still use
+their unchanged branch. AI_DISPARITY_MAX/.75, encoded pixels and colour transforms
+are not changed. The added helper is precached in v234.
+
+The real Portrait call-site regression first fails because its renderer capacity
+is 2.313668 instead of the supplied photo's 3.472317, then passes. Additional
+regressions prove all non-vector REND bytes unchanged, malformed headers rejected,
+idempotence, and a real native Portrait with matching capacity is exactly a no-op.
+Focused run: 75 pass, no skips/failures; PWA/paths/whitespace pass. These tests do
+not replace a physical Photos clipping check.
+
+Diagnostic H1_Source_HDR_Capacity.HEIC changes only the REND portion of depth XMP
+item 99 of IMG_0955_stylio_org: 1,988,899 bytes, SHA256
+9d341bdb78db541976ea32ad50708e778d85e36d3a6fce420317cb99b44895af.
+All other item payloads, references and properties (including primary, gain map,
+Styles, Texture, disparity samples/range, focus and aperture) are byte-identical.
+H0 serves the unchanged source as a control. H1 is not yet device accepted.
+
+The explicitly requested new Wi-Fi session binds 192.168.1.3:8774, route
+/9fe4b30e3274d27ea11181113fb2fffd/, expires 2026-10-20T12:56:18.940Z
+(19:56 Asia/Bangkok). Only explicit allowlisted trials are exposed; a restart
+keeps this session expiry. H1/H0 are added alongside the unchanged A/B/C/D trials.
+Phone question requests Portrait at f16/f1.4, SDR/HDR clipping and retained
+Styles/Texture/Portrait controls. Native graph/HDR brightness and blur strength
+trials from 10.162 remain pending too. Nothing new committed/pushed/deployed.
+
+## 10.164 — Device acceptance of H1 capacity and A graph; C blur strength only (2026-10-20)
+
+User feedback: H1 no longer clips the light strip. A matches the 2059 original's
+HDR and is no longer darker. C has the preferred blur strength, but depth and
+edge accuracy are still imperfect. Do not call C native-calibrated or globally
+adopt range 3 from this one scene. A and H1 are separate isolated experiments;
+combined actual-app export acceptance is still required before release.
+
+Architecture clarification from source review: AI computes a per-photo relative
+depth map from the source pixels, followed by guided edge refinement. The editable
+Portrait export nevertheless uses portrait-template.json, generated from one local
+native Portrait capture. Its depth XMP includes camera intrinsic/lens calibration
+and opaque REND settings; these are not all inferred from each uploaded image.
+Current native-graph candidate preserves source camera metadata and image/HDR graph,
+and dynamically matches the observed REND HDR capacity vector to source headroom.
+The remaining template optical settings are still reference values. C changes the
+declared relative disparity maximum to 3, not the AI geometry or edge positions.
+Do not attribute all boundary errors to template calibration without a controlled
+test; AI surface errors and coordinate/lens calibration mismatch are distinct.
+No commit/push/deployment is implied by this device feedback or clarification.
+
+## 10.165 — Per-photo Portrait geometry and full-grid edge refinement (2026-10-20)
+
+User requests replacing hardcoded capture parameters wherever they can be read
+or calculated. New uncommitted portrait-geometry.js separates source-owned values,
+estimated optics and remaining opaque renderer profile. At the real export seam,
+an initial regression fails: a 900x600 input fixture still gets the template's
+4032x3024 calibration grid. Use the actual STORED primary dimensions (the raster
+fixture stores that display input as 600x900), not display rotation a second time.
+
+AI depth now declares a virtual pinhole grid co-located with its decoded source
+pixels. Reference dimensions and center follow that grid. Prefer valid EXIF focal
+plane resolution with matching pixel aspect/orientation, otherwise estimate focal
+pixels from 35 mm equivalent focal length, diagonal geometry and declared digital
+zoom. These are estimates, not recovered camera calibration. Missing optics uses
+explicit relative image-grid projection with no invented metric PixelSize.
+Malformed/truncated/ambiguous optics is unavailable; bad focal-plane estimates can
+fall back to valid source 35 mm metadata instead of aborting the whole photo.
+Both TIFF byte orders and zero denominators are tested. EXIF 2059 reports 14 mm
+equivalent, 2081 reports 24 mm, highlight capture reports 48 mm; one donor lens
+cannot represent all three. Basis for geometry/units:
+https://developer.apple.com/documentation/avfoundation/avcameracalibrationdata
+https://www.cipa.jp/std/documents/e/CIPA_DCG-X002-2015-E.pdf
+https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf
+
+AI disparity is already registered to RGB pixel coordinates. It no longer gets
+the donor's radial distortion coefficients or optical-center offsets. Its virtual
+RGB/depth transform is identity and distortion is zero; this is NOT a claim that
+the physical camera lens was measured as distortion-free. This experiment set
+AI quality low / accuracy relative. The low-quality declaration is subsequently
+rejected on-device and corrected in 10.167; do not reapply it as a confidence tag.
+Native-depth restoration now carries the complete original depth XMP, including
+unknown optical/calibration fields, instead of exchanging it for donor matrices.
+Only effect metadata is attached; disparity range and auxC remain source-owned.
+The source HDR capacity update is shared by both builders; explicit SDR uses
+capacity 1. Unknown HDR capacity stays visibly null in the diagnostic report.
+
+REND remains a reference-v7 compatibility profile outside the empirically tested
+450..453 capacity vector. Non-camera MakerNote feature/profile records and private
+renderer tuning have not been decoded into physical camera parameters. Do not
+describe this as fully dynamic or a reconstruction of Apple's native camera.
+Reports expose geometry origin, reference-v7 renderer profile and own HDR capacity.
+
+An independent thin-silhouette regression also fails before refinement changes
+(old thin-edge error 26352 vs input 30960, insufficient improvement). Guided fitting
+now uses the full depth/RGB grid in overlapping 256x128 tiles. Radius derives from
+depth-transition slopes, bounded 4..16; correction bounds use RGB/depth covariance
+and original local depth envelope. Flat surfaces stay unchanged even with RGB
+texture. Regression tests cover thin edges, near/far ordering, no false texture
+geometry, tiny dimensions and translation across tile boundaries without seams.
+Scratch arrays are tile-bounded; model tensors are already released first.
+Offline 1024x768 replay takes roughly .5 s vs .2 s for the old downsampled fit on
+this laptop, not an iPhone timing guarantee. It cannot repair a wholly missed
+surface such as AI assigning the window the wrong depth.
+
+The user-selected C range 3 replaces .75 as the generated effect-strength policy.
+This is an artistic response setting, NOT dynamically measured metres/disparity
+calibration. Native depth never receives this policy or the AI sqrt response.
+New geometry, HDR capacity and refinement tests are wired into CI/Pages; related
+suite: 102 pass, zero skips/failures. PWA and module checks pass; cache v235.
+
+Private integrated trials are produced by ignored build-dynamic.mjs. I0/I1 use the
+same fresh Standard ONNX inference on sharp IMG_2081, same source geometry, range
+3/f1.4, and only differ in old/new refinement. Offline inference uses the browser's
+model, normalization and 630x476 input geometry, but Pillow resampling/CPU numerics
+need not be bit-identical to browser canvas/WebGPU. Source stored RGB orientation
+is explicitly recovered before inference. I2 changes only depth XMP geometry of
+accepted H1; all other payloads, refs and properties remain exact. I3 integrates
+the native graph + source HDR capacity + geometry on 2059 with the old actual depth
+and .75/f4.5, to check HDR/control preservation independently of stronger AI blur.
+Every original non-Exif source payload/property/reference is verified unchanged.
+Hashes and sizes are in ignored dynamic-candidates.json. No source photo is edited.
+
+I0/I1/I2/I3 are allowlisted on the existing Wi-Fi link, without extending its
+19:56 Asia/Bangkok expiry. Device question asks I1 vs I0 edges, I2 clipping and I3
+HDR/controls. All new geometry/refinement effects remain pending physical Photos
+validation; prior A/H1 acceptance does not automatically accept the combined path.
+No new commit, push or production deployment.
+
+## 10.166 — I0/I1/I2 lose aperture editing; I3 accepted (2026-10-20)
+
+Device feedback after 10.165: I0 and I1 lose the aperture f control in Edit. I2
+shows a Portrait icon in the photo viewer but also loses f in the Edit toolbar.
+I3 works and matches original HDR. Do NOT call the per-photo geometry candidate
+device-accepted globally, nor infer control acceptance from the 102 passing file
+tests. I3 remains an immutable positive integration control. H1 is the positive
+same-capture control for I2; their images/depth are unchanged, isolating the
+regression to new depth metadata rather than neural inference or RGB/HDR samples.
+
+Three ranked predictions require phone validation: reverting only the two lens
+coefficient arrays from I2 may recover f (Photos may reject the zero-warp profile);
+reverting only Quality low -> high may recover f; or restoring only the reference
+intrinsic matrix/pixel size may recover f. Quality low by itself is NOT proven
+the cause: I3 also uses it and works. Apple's documentation describes quality as
+suitability for rendering, but does not guarantee Photos UI behavior:
+https://developer.apple.com/documentation/avfoundation/avdepthdata/depthdataquality
+
+Ignored build-controls.mjs creates immutable single-group diagnostics based on I2:
+J1 reverts only Quality; J2 only LensDistortionCoefficients and inverse; J3 only
+IntrinsicMatrix and PixelSize. J4 reverts only Quality on I1, allowing the same
+prediction to be checked on the fresh AI/edge map too. Donor optics in J2/J3 are
+diagnostic controls, NOT a production reintroduction or newly measured optics.
+Every non-XMP payload and all references are exact; XML outside each declared
+field set is exact. Private control-candidates.json records hashes and sizes.
+They are allowlisted on the same LAN session without extending its 19:56 expiry.
+No app behavior is changed just to fit this unconfirmed hypothesis; production
+remains unchanged and physical f-control results are still required.
+
+## 10.167 — Low Quality hides aperture; accepted editing profile restored (2026-10-20)
+
+Device results: J1 has f and aperture adjustment in Photos Edit, with no clipping
+of the green light strip. J2/J3 show a viewing f/Portrait icon but still lack the
+aperture adjustment in Edit. J4 has no f icon in the initial viewer, but aperture
+adjustment works inside Edit. Its blur is too weak at f1.4 compared with Native.
+After changing f and saving, the viewer shows Portrait but it is not a tappable
+quick on/off control. All trials retain normal Styles, Texture, HDR and colour.
+Viewing icon, Edit aperture eligibility, actual blur strength, and viewer quick
+toggle are four separate outcomes. Do not infer one from another.
+
+The H1 -> I2 -> J1 and I1 -> J4 chains isolate Quality low -> high as restoring
+the tested Edit eligibility, not lens coefficients or matrix replacement. A new
+real buildAiPortrait regression runs red on the low declaration before the fix.
+The AI metadata builder now retains the profile's device-accepted high declaration,
+while keeping Accuracy relative, source-derived geometry, zero virtual distortion,
+and own HDR capacity. This compatibility declaration is NOT inferred AI certainty
+or metric camera accuracy; qualityDeclaration='editing-profile' reports its origin.
+Restored depth with complete native optics keeps its own source Quality unchanged,
+with a regression checking this independently. Accepted J4 is reproduced by the real assembler:
+every active resource and reference matches. Whole-file identity is not expected
+because the diagnostic J4 patch left an unused previous XMP extent in mdat.
+Related suite now 103 pass, zero skips/failures; module/PWA checks pass, cache v236.
+
+Native 2082 and sharp 2081 both have 24 mm EXIF equivalent and about 6.765 mm actual
+focal length; do not blame differing focal length for their observed blur delta.
+The new estimated projection differs from the reference optical profile, and
+relative AI disparity has no known metric scale. Camera Maker12 FocusDistanceRange
+in 2081 spans .125..1.171875 m, too broad for an exact focus anchor. AFMeasuredDepth
+21/AFConfidence100 are present, but units/semantics of the integer depth have not
+been established here. Do not silently treat 21 as metres, centimetres or diopters.
+
+Ignored build-blur.mjs freezes K1/K2 on J4's exact depth samples and fresh current
+assembly. K1 scales the relative range from 3 to 6.2348834422 using a thin-lens-
+inspired ratio of normalized focal projection products; K2 doubles that response
+to 12.4697668844. This is a falsifiable optical-response hypothesis, NOT a validated
+Photos renderer equation, recovered metric depth or new production policy. All
+active photographic/HDR/Styles/Texture/depth payloads are identical; only matching
+disparity auxC and depth XMP range change. Reference optical values are used to
+compare the old artistic response, not claimed as this camera's measured optics.
+Thin-lens geometry basis: https://www.pbr-book.org/3ed-2018/Camera_Models/Projective_Camera_Models
+
+K3 is separate: same J4 images, depth/range and renderer, changing only MakerNote
+ImageCaptureType 12 -> 2 (ExifTool's Portrait classification). Its viewer on/off
+behavior is unknown. It does not change PhotosAppFeatureFlags or claim those flags
+are the Portrait toggle. ImageProcessingFlags differs between neighboring camera
+shots but its bits remain opaque; no guessed bitmask or neighbor metadata is copied.
+Classification source: https://raw.githubusercontent.com/exiftool/exiftool/master/lib/Image/ExifTool/Apple.pm
+
+K1/K2/K3 are allowlisted on the same Wi-Fi session ending 19:56 Asia/Bangkok; hashes
+and sizes are in private blur-candidates.json. Phone question asks same-focus f1.4
+blur vs Native and K3 quick toggle before/after Edit/Save, plus retained controls,
+HDR and colour. Stronger response/classification are NOT integrated into app code
+pending results. The confirmed Quality correction is integrated locally only.
+No new commit/push/production deployment.
+
+Additional regression guard during this turn: the previously failed native
+restoration B variants in NativePortrait_Rebuild_V2 have high Quality but no camera
+intrinsic matrix (see 10.50), unlike accepted A. Blindly retaining that incomplete
+native XMP in 10.165 would reopen a known old control regression. Native restoration
+now retains the actual native optics only when the matrix, reference dimensions
+and pixel size form a complete finite calibration. Otherwise it explicitly keeps
+the previously accepted native-depth restoration profile, with the exact original
+depth samples/auxC/range. It reports reference-native-depth-fallback and
+referenceCalibration=true; no actual calibration is invented from the RGB camera
+for a separately warped native depth sensor. This fallback does not affect the
+modern AI J1/J4/K trials. Both complete-source preservation and missing-calibration
+fallback regressions pass. Current focused geometry/export run: 54 pass.
+
+## 10.168 — K2 response accepted; Native re-import has quick toggle; processing flags probe (2026-10-20)
+
+K1/K2/K3 device report: K2 blur strongest, K1 weakest, K3 intermediate; all have
+Edit aperture but no initial viewing f icon. HDR/Styles/Texture remain normal.
+The user then explicitly confirms K2 is almost Native. K3 changes capture class
+as well, so its intermediate response is not evidence of nonmonotonic range-only
+behavior. Do not ship capture class 2: it did not solve the viewer toggle.
+
+K2's relative response normalization is integrated locally for GENERATED AI only.
+portrait-blur-response.js reads estimated projection and source optics; compares
+normalized focal products with the profile response; uses device-selected factor
+2 and bounds [.75,24] as effect-policy constants, not recovered camera parameters.
+Unknown optics explicitly keeps unscaled relative response. It is not physical
+distance recovery or proof of Apple's private blur equation across cameras.
+The real builder opts in via depth.relativeResponse='projection-v1'; restored
+native camera depth is forbidden from that policy and its range remains exact.
+The actual assembly regression first fails then reproduces accepted K2 BYTE FOR
+BYTE on 2081 (SHA256 5b682254c40bcd871035a8dc565c92b923f35e6354ccc8bb2e709685a0c2fffe,
+range 12.469766884405981). Interactive preview receives the same exported range.
+Tests cover resolution invariance, bounds, missing optics, preview publication,
+plus existing preservation/HDR paths. Full related suite: 107 pass, zero skips /
+failures. SW v237 precaches the helper. No production release yet.
+
+L0 serves IMG_0953_native_org byte-for-byte, without Stylio. User confirms that
+re-imported Native still has a functional viewer Portrait on/off, before/after
+Edit/Save, just like original. Therefore this symptom is NOT explained by a
+general Files -> Photos import limitation; exported-file differences remain.
+
+M1 changes only MakerNote 0x19 from 2236418 (0x222002) to 2236514 (0x222062), OR
+mask 0x60 observed between sharp 2081 and camera Portrait 2082. All other MakerNote
+fields, image/HDR/Styles/Texture/depth resources remain exact. This is opaque-flag
+DIAGNOSIS, not a decoded meaning for these bits or a production patch. User says
+M1 displays a clickable viewer f menu with On/Off, but toggling does not process
+the effect, and Edit loses aperture. Styles/Texture/HDR remain normal. This is
+partial UI recognition, NOT a working toggle or acceptable result.
+
+Two single-bit diagnostics frozen from the same K2 base: N1 OR0x20 (2236450),
+SHA256 7ccea0900fc7b8734e49f07434c3c3c596d3d8521705c76896193c972c34bfaf;
+N2 OR0x40 (2236482), SHA256 d47b78c26e90a0b6f877744adbba0f6b15893951d999f93f21b6e358d8faaa50.
+Each is 2,517,748 bytes and changes only the existing processing-flags scalar.
+The original LAN session expires at 19:56 as previously set; it is not silently
+extended. N1/N2 files and explicit server allowlist are prepared, awaiting renewal
+of the local download session. No processing-flag changes are in app code.
+
+User explicitly renews the same trial set for one hour. The existing route and
+Wi-Fi host 192.168.1.3:8774 are reused; new expiry 2026-10-20T13:57:39.960Z
+(20:57:39 Asia/Bangkok). Both N1/N2 download HEAD requests return 200 with
+2,517,748 bytes. Physical viewer-toggle and Edit-aperture results remain pending.
+
+## 10.169 — N1 enables real viewer toggle and Edit aperture; integrated O (2026-10-20)
+
+Device feedback: N1 has f in the viewer, real quick Portrait on/off works, and
+Edit aperture remains adjustable. N2 has a viewing f icon but no functional quick
+toggle; Edit works. M1's two-bit combination had also lost Edit. Do not describe
+0x40 alone as proven to disable Edit; its tested failure is viewer functionality.
+The user's N1 result closes the quick-toggle loop that had remained open in K2.
+
+The modern native-graph Portrait branch now ORs ONLY 0x20 into an EXISTING valid
+MakerNote 0x19 scalar, preserving every other bit. It does not introduce 0x40,
+clear any source 0x40 bit, copy a neighboring capture word or change capture class
+to Portrait (2). Tags absent from the source are not invented; unsupported scalar
+types/counts are rejected. This bit's behavioral contract is empirical N1/N2,
+not a public Apple meaning for every ImageProcessingFlags bit. Its application is
+scoped to genuine iPhone 16+ camera MakerNotes on the source-preserving graph.
+Older native restoration and the accepted generated/non-native reference builder
+do not adopt this new source-word mutation. Texture-only is unchanged.
+
+A real assembler test first fails on N1's Exif resource, then passes after adding
+the single-bit mutation. Every ACTIVE N1 payload (including Exif), every property
+box with essential/order, and every reference now matches the fresh app assembly.
+Additional portable checks cover zero/already-set/high/other bits, exact scalar
+count/type, source immutability and preservation of all other MakerNote records.
+The real 2059/2061 camera preservation checks now allow only the explicitly tested
+viewer bit alongside the two existing Portrait feature/class fields; other scene,
+HDR and colour calibration stays exact. Related suite: 108 pass, no skips/failures.
+PWA/module/whitespace checks pass; development cache v238.
+
+Ignored build-integrated.mjs creates O_App_Integrated.HEIC directly with the current
+app assembler from sharp 2081 + Texture + the accepted depth samples, with the
+projection-v1 response and f1.4. No manual Exif/XMP patch is applied. Output:
+2,512,861 bytes, SHA256
+7ef9c258cbdea1395161d9bd464e442dfd0e7b18f174f93719921117c2690aef.
+It matches all ACTIVE N1 payloads/properties/refs exactly. It is 4,887 bytes smaller
+than patched N1 because a fresh assembly does not retain the diagnostic's unused
+previous Exif extent. This is not image/HDR recompression or reduced quality.
+O is added to the explicit LAN allowlist within the renewed session ending 20:57.
+Phone question asks final app-generated import, same K2 blur and real viewer/Edit
+controls, HDR/colour/Styles/Texture before/after Save. That integrated on-device
+check is pending; no commit/push/production deployment has been performed.
+
+## 10.170 — Integrated O accepted on iPhone (2026-10-20)
+
+The user confirms the fresh app-generated O_App_Integrated result: blur is good,
+viewer quick Portrait on/off functions, aperture f remains adjustable in Edit,
+and HDR, colour, Styles and Texture are normal. This answers the final before /
+after Save acceptance question for the integrated path in 10.169. O is the
+accepted implementation baseline for this repair; do not revert to M1/N2 or
+capture-class-2 probes. The automated preservation/metadata regressions and the
+108-test related run were completed before this device confirmation; no source
+logic changed after that run. Acceptance covers the tested photo/device flow,
+not a proof of native metric depth accuracy or identical blur on every camera.
+Code remains in the master working tree. This device acceptance alone does not
+request a new commit, push or production deployment.

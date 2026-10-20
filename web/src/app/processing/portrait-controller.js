@@ -64,7 +64,8 @@ export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcce
         if(aiFeatures.enabled('portrait'))ui.output(candidate.aiFile,{metadata});
       };
       publish(output.data);
-      try{await ui.portraitPreview(result,async(settings,isCurrent)=>{const updated=await output.withSettings(settings);if(isCurrent())publish(updated.data,false);});}
+      const previewResult={...result,disparityMax:output.report?.disparityMax??result.disparityMax};
+      try{await ui.portraitPreview(previewResult,async(settings,isCurrent)=>{const updated=await output.withSettings(settings);if(isCurrent())publish(updated.data,false);});}
       catch(error){console.warn('Portrait preview unavailable; edit focus in Photos',error);}
       candidate.state = 'done';
       ui.aiView(aiFeatures.enabled('portrait'));

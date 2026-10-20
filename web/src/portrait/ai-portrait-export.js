@@ -4,13 +4,16 @@ import {discoverHeic,extractItemData,parseIloc,replaceIdatItem,removeItems,setIt
   appendIpcoProperty,setItemPropertyAssociations,addItems,propertyBoxBytes,auxUriForItem,
   dimensionsForItem,DEPTH_URI,MATTE_URIS,compactItemProperties} from '../raster/heif.js';
 import {buildAppleStyleExif,preserveRasterExif,readExifOrientation} from '../raster/exif.js';
-import {getMakerNoteBlob,extractAppleMakerNoteTag} from '../core/exif.js';
+import {getMakerNoteBlob,extractAppleMakerNoteTag,exifCameraModel,listAppleMakerNoteTags,injectAppleMakerNoteTag} from '../core/exif.js';
 import {parseBplist} from '../core/bplist.js';
 import {appleDepthAuxc,readAppleDepthRange} from './apple-depth-metadata.js';
 import {portraitAssembler} from './ai-portrait-assembler.js';
 import {styleCapabilities} from '../styles/style-capabilities.js';
 import {normalizeLegacyPortraitHdrGain,promoteLegacyPortraitHdr} from '../styles/hdr-compatibility.js';
 import {supportsNativePortraitRestore} from './native-portrait-contract.js';
+import {rebuildHeic} from '../styles/graft.js';
+import {portraitDepthMetadata} from './portrait-geometry.js';
+import {sourcePortraitResponse} from './portrait-blur-response.js';
 const decode=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 const xml=s=>new TextEncoder().encode(s);
 let templatePromise;
@@ -20,7 +23,46 @@ async function loadTemplate(){
   }).catch(e=>{templatePromise=null;throw e;});
   return templatePromise;
 }
+function nativePortraitMaker(sourceExif,{viewerDepth=false}={}){
+  // An iPhone camera's full Apple MakerNote owns scene/tone/noise calibration.
+  // Generated raster Styles have only editing records, so retain their accepted
+  // template path. Camera model alone is insufficient (e.g. Indigo JPEG Exif).
+  if(!/^iPhone (\d+)(?:\s|$)/.test(exifCameraModel(sourceExif)||''))return null;
+  const tags=listAppleMakerNoteTags(sourceExif);
+  if(!tags.some(t=>t.tag===1&&t.type===9&&t.payload.length===4))return null;
+  let exif=sourceExif;
+  for(const [id,value]of [[0x14,12],[0x1f,1]]){
+    const little=getMakerNoteBlob(exif)[12]===73;
+    const payload=be(value,4);if(little)payload.reverse();
+    // The shared injector takes byte counts (appropriate for opaque Styles).
+    // These two fields are one signed LONG each, not four LONGs.
+    exif=injectAppleMakerNoteTag(exif,payload,id,9);
+    const mn=getMakerNoteBlob(exif),view=new DataView(mn.buffer,mn.byteOffset,mn.byteLength);
+    for(let n=0;n<view.getUint16(14,little);n++){
+      const p=16+n*12;if(view.getUint16(p,little)===id)view.setUint32(p+4,1,little);
+    }
+  }
+  const maker=getMakerNoteBlob(exif);
+  if(viewerDepth){
+    // Device N1 isolates 0x20 as enabling a functional viewer toggle while
+    // retaining Edit aperture. Do not add 0x40 (M1/N2) or copy the donor word.
+    // Preserve every other source bit; absent/unknown fields are not invented.
+    const tag=tags.find(t=>t.tag===0x19);
+    if(tag){
+      if(![4,9].includes(tag.type)||tag.payload.length!==4)throw Error('Unsupported Portrait processing flags');
+      const little=maker[12]===73,v=new DataView(maker.buffer,maker.byteOffset,maker.byteLength);
+      for(let n=0;n<v.getUint16(14,little);n++){
+        const at=16+n*12;if(v.getUint16(at,little)!==0x19)continue;
+        if(v.getUint32(at+4,little)!==1)throw Error('Unsupported Portrait processing flags count');
+        v.setUint32(at+8,(v.getUint32(at+8,little)|0x20)>>>0,little);
+      }
+    }
+  }
+  return maker;
+}
 function makerBlob(template,sourceMarker,sourceExif){
+  const native=nativePortraitMaker(sourceExif);
+  if(native)return native;
   const little=template.makerLittle,write=(n,size)=>little?be(n,size).reverse():be(n,size);
   // Live Photo identity belongs to the source, never the Portrait template.
   const hdrTags=new Map();
@@ -73,6 +115,36 @@ function replaceMaker(exif,maker){
     view.setUint16(start+p+2,7,little);view.setUint32(start+p+4,maker.length,little);view.setUint32(start+p+8,t.length,little);return out;}
   throw Error('Portrait Exif missing MakerNote');
 }
+function portraitFocusXmp(w,h,focusX,focusY){
+  return xml(`<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/" xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#" xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#"><mwg-rs:Regions rdf:parseType="Resource"><mwg-rs:AppliedToDimensions stDim:w="${w}" stDim:h="${h}" stDim:unit="pixel"/><mwg-rs:RegionList><rdf:Bag><rdf:li rdf:parseType="Resource"><mwg-rs:Type>Focus</mwg-rs:Type><mwg-rs:Area stArea:x="${focusX}" stArea:y="${focusY}" stArea:w="0.1" stArea:h="0.1" stArea:unit="normalized"/></rdf:li></rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions></rdf:Description></rdf:RDF></x:xmpmeta>`);
+}
+function appendNativePortrait(source,d,depth,metadata,maker,{focusX,focusY}){
+  // Modern camera Styles already own a complete editor/HDR graph. Add depth
+  // without exchanging that graph for the reference layout or remapping IDs
+  // embedded in opaque Apple metadata. All source properties/groups/refs stay.
+  let meta=source.slice(d.meta.off,d.meta.off+d.meta.size);
+  const generatedAuxc=appleDepthAuxc(depth); // validate the range even for a native descriptor
+  const reuse=[],transforms=(d.props.associations.get(d.primary)||[])
+    .filter(a=>['irot','imir'].includes(d.props.properties[a.index-1].type)).map(a=>[a.index,a.essential]);
+  for(const [p,essential]of [
+    [box('ispe',concat([new Uint8Array(4),be(depth.width,4),be(depth.height,4)])),false],
+    [box('pixi',Uint8Array.of(0,0,0,0,1,8)),false],
+    [depth.nativeAuxc??generatedAuxc,true],[depth.hvcc,true],
+  ]){let index;[meta,index]=appendIpcoProperty(meta,p);reuse.push([index,essential]);}
+  reuse.push(...transforms);
+  const targets=[d.primary,...[...d.infos].filter(([,i])=>i.type==='tmap').map(([id])=>id)];
+  let ids;[meta,ids]=addItems(meta,[{key:'depth',itemType:'hvc1',refType:'auxl',refTo:targets,reuse}]);
+  const depthId=ids.get('depth');
+  [meta,ids]=addItems(meta,[{key:'depth-xmp',itemType:'mime',contentType:'application/rdf+xml',refType:'cdsc',refTo:[depthId]},
+    {key:'focus-xmp',itemType:'mime',contentType:'application/rdf+xml',refType:'cdsc',refTo:targets}]);
+  const [w,h]=dimensionsForItem(d.props,d.primary),ownExif=extractItemData(source,d,d.exifItem);
+  const payloads=new Map([[depthId,depth.payload],
+    [ids.get('depth-xmp'),metadata.data],
+    [ids.get('focus-xmp'),portraitFocusXmp(w,h,focusX,focusY)],
+    [d.exifItem,replaceMaker(ownExif,maker)]]);
+  const ft=topBox(source,'ftyp'),data=rebuildHeic(source,d,source.slice(ft.off,ft.off+ft.size),meta,payloads);
+  return {data,report:{mode:'editable-ai-portrait',relative:true,bakedBlur:false,...metadata.report,nativeGraphPreserved:true}};
+}
 function assemble(meta,payloads,ftyp){
   const iloc=parseIloc(meta,topBox(meta,'meta'));let cursor=ftyp.length+meta.length+8;const chunks=[];
   for(const[id,item]of iloc.items){
@@ -91,6 +163,26 @@ export function buildAiPortrait(source,depth,template,{focusX=.5,focusY=.5,apert
   const d=discoverHeic(source);
   if([...d.infos.keys()].some(id=>auxUriForItem(d.props,id)===DEPTH_URI))throw Error('Existing depth must not be replaced');
   if(!d.stylesItem||!d.deltaGrid||!d.linearThumb)throw Error('Portrait requires the completed Styles graph');
+  if(![focusX,focusY,aperture].every(Number.isFinite)||focusX<0||focusX>1||focusY<0||focusY>1||aperture<1||aperture>22)
+    throw Error('Invalid Portrait focus/aperture');
+  let response;
+  if(depth.relativeResponse!==undefined){
+    if(depth.relativeResponse!=='projection-v1'||depth.nativeAuxc||depth.nativeXmp!==undefined||(depth.floatMin!==undefined&&depth.floatMin!==0))
+      throw Error('Unsupported relative Portrait response');
+    response=sourcePortraitResponse(source,d,template,depth.floatMax);
+    depth={...depth,floatMax:response.disparityMax};
+  }
+  const metadata=portraitDepthMetadata(source,d,depth,template,aperture);
+  if(response)Object.assign(metadata.report,response);
+  const sourceExif=extractItemData(source,d,d.exifItem),generation=/^iPhone (\d+)(?:\s|$)/.exec(exifCameraModel(sourceExif)||'');
+  if(generation&&Number(generation[1])>=16){
+    const maker=nativePortraitMaker(sourceExif,{viewerDepth:true});
+    if(maker){
+      const marker=extractAppleMakerNoteTag(sourceExif);if(![1,7].includes(marker.type))throw Error('Unsupported Styles marker type');
+      parseBplist(marker.payload);
+      return appendNativePortrait(source,d,depth,metadata,maker,{focusX,focusY});
+    }
+  }
   let meta=decode(template.meta),reference=discoverHeic(meta);
   const payloads=new Map(),mapping=new Map(),copied=new Map(),removed=new Set();
   const depthId=[...reference.infos.keys()].find(id=>auxUriForItem(reference.props,id)===DEPTH_URI);
@@ -196,15 +288,10 @@ export function buildAiPortrait(source,depth,template,{focusX=.5,focusY=.5,apert
       .filter(p=>['irot','imir'].includes(p.type)).map(p=>source.slice(p.box.off,p.box.off+p.box.size))];
   const associations=[];for(const p of depthProps){let index;[meta,index]=appendIpcoProperty(meta,p);associations.push([index,!['ispe','pixi'].includes(String.fromCharCode(...p.slice(4,8)))]);}
   meta=setItemPropertyAssociations(meta,depthId,associations);
-  if(![focusX,focusY,aperture].every(Number.isFinite)||focusX<0||focusX>1||focusY<0||focusY>1||aperture<1||aperture>22)
-    throw Error('Invalid Portrait focus/aperture');
   payloads.set(depthId,depth.payload);
-  payloads.set(depthSide,xml(template.depthXmp.replace(/(<apdi:FloatMinValue>)[^<]+(<\/apdi:FloatMinValue>)/,
-    (_,a,b)=>a+(depth.floatMin??0)+b).replace(/(<apdi:FloatMaxValue>)[^<]+(<\/apdi:FloatMaxValue>)/,
-    (_,a,b)=>a+(depth.floatMax??1)+b).replace(/(<depthBlurEffect:SimulatedAperture>)[^<]+(<\/depthBlurEffect:SimulatedAperture>)/,
-    (_,a,b)=>a+aperture.toFixed(6)+b)));
+  payloads.set(depthSide,metadata.data);
   const ownExif=extractItemData(source,d,d.exifItem),[w,h]=dimensionsForItem(d.props,d.primary);
-  payloads.set(focusSide,xml(`<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/" xmlns:stDim="http://ns.adobe.com/xap/1.0/sType/Dimensions#" xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#"><mwg-rs:Regions rdf:parseType="Resource"><mwg-rs:AppliedToDimensions stDim:w="${w}" stDim:h="${h}" stDim:unit="pixel"/><mwg-rs:RegionList><rdf:Bag><rdf:li rdf:parseType="Resource"><mwg-rs:Type>Focus</mwg-rs:Type><mwg-rs:Area stArea:x="${focusX}" stArea:y="${focusY}" stArea:w="0.1" stArea:h="0.1" stArea:unit="normalized"/></rdf:li></rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions></rdf:Description></rdf:RDF></x:xmpmeta>`));
+  payloads.set(focusSide,portraitFocusXmp(w,h,focusX,focusY));
   meta=setItemReference(meta,'cdsc',focusSide,targets);
   const sourceMarker=extractAppleMakerNoteTag(ownExif);
   if(![1,7].includes(sourceMarker.type))throw Error('Unsupported Styles marker type');
@@ -233,7 +320,7 @@ export function buildAiPortrait(source,depth,template,{focusX=.5,focusY=.5,apert
   if(finalMarker.type!==sourceMarker.type||!bytesEqual(finalMarker.payload,sourceMarker.payload))throw Error('Selected Styles changed');
   for(const[id,p]of copied)if(![reference.exifItem,reference.stylesItem].includes(id)&&!bytesEqual(extractItemData(data,after,id),p))throw Error('Portrait source preservation failed');
   if(!bytesEqual(extractItemData(data,after,reference.stylesItem),extractItemData(source,d,d.stylesItem)))throw Error('Completed Styles changed');
-  return {data,report:{mode:'editable-ai-portrait',relative:true,bakedBlur:false,referenceCalibration:true,
+  return {data,report:{mode:'editable-ai-portrait',relative:true,bakedBlur:false,...metadata.report,
     ...(legacyHdr?{legacyHdrCompatibility:'normalized-portrait-tmap'}:{})}};
 }
 /** Diagnostic adapter only: a verified unblurred base is required. Metadata
@@ -264,7 +351,7 @@ export async function restoreNativePortrait(source,template,{unblurredBase=false
   const pixi=propertyBoxBytes(source,d.props,id,'pixi');
   if(d.infos.get(id)?.type!=='hvc1'||!hvcc||!pixi||pixi[12]!==1||pixi[13]!==8)return null;
   const nativeAuxc=propertyBoxBytes(source,d.props,id,'auxC');
-  const depth={width,height,hvcc,payload:extractItemData(source,d,id),nativeAuxc,...nativeRange};
+  const depth={width,height,hvcc,payload:extractItemData(source,d,id),nativeAuxc,nativeXmp:xmp,...nativeRange};
   const meta=removeItems(source.slice(d.meta.off,d.meta.off+d.meta.size),[id,side]),graph=discoverHeic(meta);
   const payloads=new Map([...graph.infos.keys()].filter(key=>graph.iloc.items.get(key)?.constructionMethod!==1)
     .map(key=>[key,extractItemData(source,d,key)]));
@@ -293,7 +380,7 @@ export async function exportAiPortrait(result,onProgress=()=>{},{signal}={}){
     signal?.throwIfAborted();
     const encoded=await encodeHevcPixels(result.gray,{width:result.width,height:result.height,pixelFormat:'gray',fullRange:true,lossless:true},onProgress);
     signal?.throwIfAborted();
-    const depth={...encoded,width:result.width,height:result.height,floatMax:result.disparityMax??1};
+    const depth={...encoded,width:result.width,height:result.height,floatMax:result.disparityMax??1,relativeResponse:'projection-v1'};
     const assembler=portraitAssembler(legacyHdr?.data||result.sourceData,depth,template,{signal,
       legacyHdrNormalized:Boolean(legacyHdr)});
     try{return {...await assembler.build(),withSettings:assembler.build,dispose:assembler.dispose};}

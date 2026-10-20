@@ -4,12 +4,12 @@ import {portraitAssembler,latestSettingsWriter} from '../../web/src/portrait/ai-
 import {protectPersonDepth} from '../../web/src/portrait/person-depth-guidance.js';
 import {inferDepth} from '../../web/src/portrait/ai-inference.js';
 
-test('F depth response preserves ordering and reduces near-object defocus relative to distant background',()=>{
+test('relative depth response preserves ordering and compresses near-object separation at the accepted C strength',()=>{
   const original=Uint8Array.of(2,65,118,166,255),shaped=shapeAiDisparity(original);
   assert.deepEqual(original,Uint8Array.of(2,65,118,166,255),'never alter the input');
   assert.deepEqual(shaped,Uint8Array.of(23,129,173,206,255));
-  const beforeNear=original[3]-original[1],afterNear=(shaped[3]-shaped[1])*AI_DISPARITY_MAX;
-  const beforeFar=original[1]-original[0],afterFar=(shaped[1]-shaped[0])*AI_DISPARITY_MAX;
+  const beforeNear=(original[3]-original[1])*AI_DISPARITY_MAX,afterNear=(shaped[3]-shaped[1])*AI_DISPARITY_MAX;
+  const beforeFar=(original[1]-original[0])*AI_DISPARITY_MAX,afterFar=(shaped[1]-shaped[0])*AI_DISPARITY_MAX;
   assert.ok(afterNear<beforeNear);assert.ok(afterFar>beforeFar);
   const ramp=shapeAiDisparity(Uint8Array.from({length:256},(_,i)=>i));
   assert.equal(ramp[0],0);assert.equal(ramp[255],255);
@@ -92,10 +92,44 @@ test('RGB edge refinement reduces depth bleeding without fabricating texture geo
   const refined=refineDepthEdges(ramp,rgb,w,h);
   const error=map=>{let total=0;for(let y=0;y<h;y++)for(let x=61;x<=66;x++)total+=Math.abs(map[y*w+x]-(x<64?0:255));return total;};
   assert.ok(error(refined)<error(ramp)*.85,`colour-guided boundary error ${error(refined)} vs ${error(ramp)}`);
-  for(let i=0;i<ramp.length;i++)assert.ok(Math.abs(refined[i]-ramp[i])<=24,'RGB textures cannot create a deep hole');
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(x<56||x>72)
+    assert.equal(refined[y*w+x],ramp[y*w+x],'correction stays in existing depth transitions');
+  assert.ok(refined[63]<refined[64],'foreground/background ordering is preserved');
   const constant=new Uint8Array(w*h).fill(132);
   assert.deepEqual(refineDepthEdges(constant,rgb,w,h),constant,'a colour edge alone is not a depth boundary');
   assert.deepEqual(ramp.slice(0,45),refined.slice(0,45),'distant flat background remains intact');
+});
+
+test('native-resolution refinement can resolve a thin silhouette lost by the old 256-pixel fitting grid',()=>{
+  const w=1024,h=24,rgb=new Uint8Array(w*h*3),gray=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const near=x>=511&&x<=512,p=y*w+x;
+    rgb.set(near?[210,50,25]:[25,40,160],p*3);
+    gray[p]=Math.round(160*Math.max(0,1-Math.abs(x-511.5)/18));
+  }
+  const out=refineDepthEdges(gray,rgb,w,h);
+  const error=map=>{let n=0;for(let y=0;y<h;y++)for(let x=506;x<=517;x++)n+=Math.abs(map[y*w+x]-((x===511||x===512)?156:0));return n;};
+  assert.ok(error(out)<error(gray)*.8,`thin-edge error ${error(out)} vs ${error(gray)}`);
+  assert.deepEqual(refineDepthEdges(new Uint8Array(w*h).fill(80),rgb,w,h),new Uint8Array(w*h).fill(80));
+  assert.deepEqual(gray.slice(0,450),out.slice(0,450));
+});
+
+test('depth edge tiling has no boundary seam and preserves empty/tiny/constant surfaces',()=>{
+  const w=600,h=270;
+  const run=(cx,cy)=>{
+    const rgb=new Uint8Array(w*h*3),gray=new Uint8Array(w*h);
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const p=y*w+x,inside=x>=cx&&y>=cy;
+      rgb.set(inside?[200,40,20]:[20,40,190],p*3);
+      gray[p]=Math.round(255*Math.min(Math.max(0,Math.min(1,(x-cx+8)/16)),Math.max(0,Math.min(1,(y-cy+8)/16))));
+    }
+    return refineDepthEdges(gray,rgb,w,h);
+  };
+  const a=run(256,128),b=run(310,174);
+  for(let y=-20;y<20;y++)for(let x=-20;x<20;x++)assert.equal(a[(128+y)*w+256+x],b[(174+y)*w+310+x],'moving the same edge across a tile border changes no depth');
+  for(const [w,h]of [[1,1],[1,5],[5,1]]){
+    const gray=new Uint8Array(w*h).fill(123);assert.deepEqual(refineDepthEdges(gray,new Uint8Array(w*h*3),w,h),gray);
+  }
 });
 
 test('assembly worker abort/disposal rejects outstanding settings and releases buffers',async()=>{

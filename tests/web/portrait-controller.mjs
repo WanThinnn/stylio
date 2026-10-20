@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 
 // Keep the real queue/publication lifecycle; replace only costly AI/codec imports.
-function controller({failure=null,previewPending=false}={}){
+function controller({failure=null,previewPending=false,disparityMax}={}){
  let source=readFileSync(new URL('../../web/src/app/processing/portrait-controller.js',import.meta.url),'utf8')
   .replace(/^import .*;\r?\n/gm,'').replace('export function createPortraitController','function createPortraitController');
  for(const[name,replacement]of [
@@ -15,11 +15,11 @@ function controller({failure=null,previewPending=false}={}){
   AbortController,DOMException,setTimeout,clearTimeout,Uint8Array,File,
   releaseDecodeCache(){},releaseHevcEncoder(){},releaseRasterEncoder(){},releaseHeicProcessor(){},photoCaptureDate:()=>null,
   console:{warn(){}},testDependencies:{createAiPortrait:async()=>{if(failure)throw failure;return {};},
-   exportAiPortrait:async()=>({data:Uint8Array.of(1),dispose(){},withSettings(){}})},
+   exportAiPortrait:async()=>({data:Uint8Array.of(1),report:{disparityMax},dispose(){},withSettings(){}})},
  });
  const ui={outputPendingState:true,progress(){},aiState(){},note(){},aiBusy(){},aiView(){},cancelAi:()=>()=>{},cleanup(){},
   output(file){this.published=file;},outputPending(pending){this.outputPendingState=pending;},
-  async portraitPreview(){this.portraitPending=previewPending;},
+  async portraitPreview(result){this.previewResult=result;this.portraitPending=previewPending;},
  };
  const runner=create({aiFeatures:{enabled:id=>id==='portrait'},aiCandidates:[],aiText:()=>({}),
   gpuAcceleration:{checked:true},selectedAiLevel:()=> 'lite'});
@@ -41,4 +41,10 @@ test('a genuine pending Portrait preview continues to protect the downloadable r
  const {ui,candidate,runner}=controller({previewPending:true});
  await runner.runAiCandidate(candidate);
  assert.equal(candidate.state,'done');assert.equal(ui.outputPendingState,true);
+});
+
+test('interactive preview receives the same normalized disparity range as the exported Portrait',async()=>{
+ const {ui,candidate,runner}=controller({disparityMax:12.469766884405981});
+ await runner.runAiCandidate(candidate);
+ assert.equal(candidate.state,'done');assert.equal(ui.previewResult.disparityMax,12.469766884405981);
 });
