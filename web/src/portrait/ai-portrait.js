@@ -1,12 +1,15 @@
 import {inferenceGeometry} from './ai-portrait-container.js';
 import {refineDepth,shapeAiDisparity,AI_DISPARITY_MAX} from './ai-depth-refinement.js';
 import {discoverHeic,dimensionsForItem} from '../core/heif.js';
-import {itemOrientation} from '../raster/heif.js';
+import {itemOrientation,storedPointToDisplay} from '../raster/heif.js';
 import {aiSourceCanvas,rgbSample} from './ai-portrait-source.js';
 import {inferDepth,awaitAiSource,depthInputBudgets,canRetryDepth,canFallbackDepthToCpu} from './ai-inference.js';
-import {readPersonGuidance} from './person-depth-guidance.js';
+import {readApplePortraitMatte,readAppleSkinMatte} from './person-depth-guidance.js';
 import {depthModel} from './depth-models.js';
 import {refinePortraitSubject} from './subject-inference.js';
+import {inferForegroundMatte} from './foreground-matte-inference.js';
+import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor} from './foreground-matte.js';
+import {fusePortraitDepth} from './subject-depth-guidance.js';
 
 export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{signal,provider='webgpu',modelId='standard'}={}) {
   depthModel(modelId);
@@ -25,8 +28,12 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
     // the old preview and passing invented detail to the depth model.
     source=await awaitAiSource(()=>aiSourceCanvas(data,{width:Math.max(input.width,width),height:Math.max(input.height,height),...orientation},sourceFile),signal);
     signal?.throwIfAborted();
-    const previewRgb=rgbSample(source,width,height);let inferred,used,person=null,usedProvider=provider,lastError;
-    try{person=await readPersonGuidance(data,width,height);}catch(error){console.warn('Optional person guidance unavailable',error);}
+    const previewRgb=rgbSample(source,width,height);
+    let inferred,used,appleMatte=null,skinMatte=null,usedProvider=provider,lastError;
+    try{appleMatte=await readApplePortraitMatte(data,width,height);}
+    catch(error){console.warn('Optional Apple Portrait Effects Matte unavailable',error);}
+    try{skinMatte=await readAppleSkinMatte(data,width,height);}
+    catch(error){console.warn('Optional Apple semantic skin matte unavailable',error);}
     signal?.throwIfAborted();
     const providers=provider==='webgpu'?['webgpu','wasm']:['wasm'];
     providerLoop: for(const candidateProvider of providers){
@@ -36,7 +43,7 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         try{
           inferred=await inferDepth(rgbSample(source,used.width,used.height),used,{signal,provider:candidateProvider,modelId,
             onProgress:(stage,progress)=>onProgress(candidateProvider==='wasm'&&stage==='inference'?'inferenceCpu':stage,progress),
-            guidance:{rgb:previewRgb,person,width,height}});
+            guidance:{rgb:previewRgb,person:appleMatte?.confidence??null,width,height}});
           usedProvider=candidateProvider;break providerLoop;
         }catch(error){
           lastError=error;signal?.throwIfAborted();
@@ -54,22 +61,59 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
       if(!inferred)throw lastError||Error('AI depth inference failed');
     }
     if(!inferred)throw lastError||Error('AI depth inference failed');
-    // Custom providers may return float values. The production worker refines
-    // the map off the UI thread and quantizes only after guided resampling.
-    let gray=shapeAiDisparity(inferred.gray||refineDepth(inferred.values,inferred.mw,inferred.mh,previewRgb,width,height)),subjectReport;
-    // The depth worker has finished and been terminated. Release the decode
-    // surface before the separate subject encoder/decoder allocation.
+
+    // The depth worker is terminated before any foreground model is created.
+    let gray=shapeAiDisparity(inferred.gray||refineDepth(inferred.values,inferred.mw,inferred.mh,previewRgb,width,height));
     source.width=source.height=0;
-    try{
-      onProgress('subjectRefining');
-      const subject=await refinePortraitSubject(gray,previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
-      if(!(subject.gray instanceof Uint8Array)||subject.gray.length!==gray.length)throw Error('Invalid refined subject depth');
-      gray=subject.gray;subjectReport=subject.subjectReport;
-    }catch(error){
-      signal?.throwIfAborted();if(['AbortError','TimeoutError'].includes(error.name))throw error;
-      console.warn('Subject refinement unavailable; retaining generated depth',error);
-      subjectReport={applied:false,reason:'unavailable'};
+
+    let generatedMatte=null,matte=null,subjectReport={applied:false,reason:'no-foreground-guidance'},foregroundReport={},suggestedFocus;
+    if(modelId!=='lite'){
+      try{
+        onProgress('subjectRefining');
+        // Standard and Pro share the accepted foreground/edge pipeline.
+        // Their tier selects only the depth model above.
+        generatedMatte=await inferForegroundMatte(previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
+      }catch(error){
+        signal?.throwIfAborted();onProgress('qualityFallback');
+        console.warn('General foreground matte unavailable; continuing with Apple matte if present',error);
+        foregroundReport.generatedError=String(error?.message||error);
+      }
     }
-    return {gray,subjectReport,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,provider:usedProvider,modelId};
+    // Select the full PEM subject before consulting skin. The dominant PEM
+    // group preserves held metal and occluded fingers while excluding detached
+    // foreground detections on unrelated background objects.
+    const focusAnchor=portraitFocusAnchor(appleMatte,skinMatte,width,height);
+    matte=fuseForegroundMattes(focusAnchor,generatedMatte,width,height);
+    if(matte){
+      foregroundReport={...foregroundReport,apple:appleMatte?.report??null,skin:skinMatte?.report??null,
+        anchor:focusAnchor?.report??null,anchorSource:focusAnchor?.source??null,
+        generated:generatedMatte?.report??null,fused:matte.report??null};
+      try{
+        onProgress('subjectRefining');
+        const subject=await refinePortraitSubject(matte,previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
+        if(subject?.matte?.confidence?.length===gray.length){matte=subject.matte;foregroundReport.edge=subject.subjectReport;}
+      }catch(error){
+        signal?.throwIfAborted();onProgress('qualityFallback');
+        console.warn('EdgeSAM matte refinement unavailable; retaining accepted matte',error);
+        foregroundReport.edge={applied:false,reason:'unavailable',error:String(error?.message||error)};
+      }
+      // Keep every valid skin component. Protection still intersects the final
+      // foreground, so skin alone cannot expand the accepted subject.
+      const protectionMatte=skinMatte;
+      const fused=fusePortraitDepth(gray,matte,width,height,{protectionMatte});gray=fused.gray;
+      foregroundReport.depth={...fused.report,protectionSource:protectionMatte?.source??null};
+      subjectReport={...fused.report,foreground:true,edge:foregroundReport.edge??null};
+      const focus=foregroundFocusPoint(matte,width,height);
+      if(focus){
+        const display=storedPointToDisplay(focus.x,focus.y,orientation.angle,orientation.mirror);
+        suggestedFocus={x:focus.x,y:focus.y,displayX:display.x,displayY:display.y,confidence:focus.confidence};
+      }
+    }else{
+      foregroundReport={apple:null,generated:null,fused:null,reason:'no-foreground-guidance'};
+    }
+
+    return {gray,subjectReport,foregroundReport,suggestedFocus,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,
+      sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,
+      provider:usedProvider,modelId};
   } finally { if(source)source.width=source.height=0; }
 }

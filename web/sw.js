@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v239`;
+const CACHE_NAME = `${CACHE_PREFIX}v241`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -86,6 +86,10 @@ const APP_SHELL = [
   "./src/portrait/subject-mask.js",
   "./src/portrait/subject-inference.js",
   "./src/portrait/subject-inference-worker.js",
+  "./src/portrait/foreground-matte.js",
+  "./src/portrait/foreground-matte-model.js",
+  "./src/portrait/foreground-matte-inference.js",
+  "./src/portrait/foreground-matte-worker.js",
   "./src/media/auxiliary-image.js",
   "./src/portrait/ai-portrait-assembler.js",
   "./src/portrait/ai-portrait-export-worker.js",
@@ -347,7 +351,7 @@ self.addEventListener("fetch", (event) => {
       // retaining a second 100 MB copy here. Small runtime assets share a
       // revision cache; the manifest revalidates when deployment changes.
       if(/\.onnx(?:_data)?$/.test(url.pathname))return isolated(await fetch(request));
-      if(url.pathname.endsWith('/assets.json'))return networkFirst(request);
+      if(/\/(?:assets|foreground-assets)\.json$/.test(url.pathname))return networkFirst(request);
       try {cache=await caches.open(DEPTH_ASSET_CACHE);const hit=await cache.match(request);if(hit)return isolated(hit);} catch {}
       const response=await fetch(request);
       if(response.ok&&cache)try{await cache.put(request,response.clone());}catch{}

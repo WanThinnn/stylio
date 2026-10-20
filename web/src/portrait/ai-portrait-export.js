@@ -383,7 +383,8 @@ export async function exportAiPortrait(result,onProgress=()=>{},{signal}={}){
     const depth={...encoded,width:result.width,height:result.height,floatMax:result.disparityMax??1,relativeResponse:'projection-v1'};
     const assembler=portraitAssembler(legacyHdr?.data||result.sourceData,depth,template,{signal,
       legacyHdrNormalized:Boolean(legacyHdr)});
-    try{return {...await assembler.build(),withSettings:assembler.build,dispose:assembler.dispose};}
+    const initial={focusX:result.suggestedFocus?.x??.5,focusY:result.suggestedFocus?.y??.5,aperture:4.5};
+    try{return {...await assembler.build(initial),withSettings:assembler.build,dispose:assembler.dispose};}
     catch(error){assembler.dispose();throw error;}
   }catch(error){if(signal?.aborted)throw signal.reason;throw error;}
   finally{signal?.removeEventListener('abort',abort);releaseHevcEncoder();}

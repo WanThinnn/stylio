@@ -1,4 +1,5 @@
-import {displayPointToStored} from '../raster/heif.js';
+import {displayPointToStored,storedPointToDisplay} from '../raster/heif.js';
+import {mattePromptPoints,MATTE_FOREGROUND,MATTE_BACKGROUND} from './foreground-matte.js';
 
 function geometry(width,height,orientation={}){
   if(![width,height].every(n=>Number.isInteger(n)&&n>0))throw Error('Invalid subject image geometry');
@@ -6,13 +7,14 @@ function geometry(width,height,orientation={}){
   if(![0,90,180,270].includes(angle)||![null,0,1].includes(mirror))throw Error('Invalid subject orientation');
   return {dw:swap?height:width,dh:swap?width:height,angle,mirror};
 }
+
 function storedIndex(x,y,dw,dh,width,height,angle,mirror){
   const p=displayPointToStored((x+.5)/dw,(y+.5)/dh,angle,mirror);
-  return Math.max(0,Math.min(height-1,Math.floor(p.y*height)))*width+Math.max(0,Math.min(width-1,Math.floor(p.x*width)));
+  return Math.max(0,Math.min(height-1,Math.floor(p.y*height)))*width+
+    Math.max(0,Math.min(width-1,Math.floor(p.x*width)));
 }
 
-// Match the author's RGB normalization and bottom/right padding. Operate on
-// the display-oriented scene; masks are mapped back to the stored HEIF grid.
+// Match EdgeSAM's author preprocessing and operate in display orientation.
 export function subjectImageInput(rgb,width,height,orientation){
   const {dw,dh,angle,mirror}=geometry(width,height,orientation);
   if(!(rgb instanceof Uint8Array)||rgb.length!==width*height*3)throw Error('Invalid subject RGB');
@@ -33,58 +35,81 @@ export function subjectImageInput(rgb,width,height,orientation){
   return {data,width:iw,height:ih,displayWidth:dw,displayHeight:dh};
 }
 
-// The initial preview focuses at the centre. If that point has no isolated
-// object, probe the remaining grid points in source-depth order, near first.
-// No bottle position, subject dimensions or camera calibration is stored here.
-export function subjectPrompts(gray,width,height,orientation){
-  const {dw,dh,angle,mirror}=geometry(width,height,orientation);
-  if(gray.length!==width*height)throw Error('Invalid subject depth');
-  const rest=[];
-  for(const y of [.25,.5,.75])for(const x of [.25,.5,.75])if(x!==.5||y!==.5){
-    const index=storedIndex(Math.floor(x*dw),Math.floor(y*dh),dw,dh,width,height,angle,mirror);
-    rest.push({x,y,depth:gray[index]});
-  }
-  rest.sort((a,b)=>b.depth-a.depth);
-  return [{x:.5,y:.5},...rest.map(({x,y})=>({x,y}))];
+export function subjectDecoderPrompts(matte,width,height,orientation,{positiveCount=6,negativeCount=6}={}){
+  if(!matte?.confidence||matte.width!==width||matte.height!==height)throw Error('Invalid subject matte');
+  const {angle,mirror}=geometry(width,height,orientation),points=mattePromptPoints(matte,width,height,{positiveCount,negativeCount});
+  const convert=(point,label)=>{
+    const display=storedPointToDisplay(point.x,point.y,angle,mirror);
+    return {x:display.x,y:display.y,label};
+  };
+  return [...points.positive.map(p=>convert(p,1)),...points.negative.map(p=>convert(p,0))];
 }
 
-export function subjectMasks(masks,mw,mh,scores,width,height,orientation,point){
-  const {dw,dh,angle,mirror}=geometry(width,height,orientation),n=mw*mh;
-  if(!(masks instanceof Float32Array)||!Number.isInteger(mw)||!Number.isInteger(mh)||mw<1||mh<1
-    ||masks.length!==scores.length*n||!scores.length||!Number.isFinite(point.x)||!Number.isFinite(point.y)
-    ||point.x<0||point.x>1||point.y<0||point.y>1)throw Error('Invalid subject mask output');
-  const best=Math.max(...scores);if(!Number.isFinite(best))throw Error('Invalid subject mask score');
-  const result=[],queue=new Int32Array(dw*dh);
-  const sample=(i,x,y)=>{
-    // align_corners=false, same two bilinear resizes/crop as EdgeSAM ONNX.
-    const scale=1024/Math.max(dw,dh),iw=Math.round(dw*scale),ih=Math.round(dh*scale);
-    const sx=((x+.5)*iw/dw)*mw/1024-.5,sy=((y+.5)*ih/dh)*mh/1024-.5;
-    const ix=Math.floor(sx),iy=Math.floor(sy),fx=sx-ix,fy=sy-iy;let value=0;
-    for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++){
-      const ax=Math.max(0,Math.min(mw-1,ix+dx)),ay=Math.max(0,Math.min(mh-1,iy+dy));
-      const v=masks[i*n+ay*mw+ax];if(!Number.isFinite(v))throw Error('Invalid subject mask logits');
-      value+=v*(dx?fx:1-fx)*(dy?fy:1-fy);
-    }
-    return value>0;
-  };
-  for(let i=0;i<scores.length;i++){
-    if(!Number.isFinite(scores[i]))throw Error('Invalid subject mask score');
-    if(scores[i]<.85||scores[i]<best-.03)continue;
-    const sx=Math.min(dw-1,Math.floor(point.x*dw)),sy=Math.min(dh-1,Math.floor(point.y*dh));
-    if(!sample(i,sx,sy))continue;
-    const seen=new Uint8Array(dw*dh);let head=0,tail=1,border=false;queue[0]=sy*dw+sx;seen[queue[0]]=1;
-    while(head<tail){
-      const p=queue[head++],x=p%dw,y=Math.floor(p/dw);if(!x||!y||x===dw-1||y===dh-1)border=true;
-      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
-        if(!dx&&!dy)continue;const ax=x+dx,ay=y+dy;
-        if(ax<0||ay<0||ax>=dw||ay>=dh)continue;
-        const q=ay*dw+ax;if(seen[q])continue;seen[q]=1;if(sample(i,ax,ay))queue[tail++]=q;
-      }
-    }
-    if(border||tail<32||tail>dw*dh*.5)continue;
-    const mask=new Uint8Array(width*height);
-    for(let j=0;j<tail;j++){const p=queue[j];mask[storedIndex(p%dw,Math.floor(p/dw),dw,dh,width,height,angle,mirror)]=255;}
-    result.push({mask,score:scores[i],pixels:tail,index:i});
+function rawMaskSample(masks,index,mw,mh,dw,dh,x,y){
+  const n=mw*mh,scale=1024/Math.max(dw,dh),iw=Math.round(dw*scale),ih=Math.round(dh*scale);
+  const sx=((x+.5)*iw/dw)*mw/1024-.5,sy=((y+.5)*ih/dh)*mh/1024-.5;
+  const ix=Math.floor(sx),iy=Math.floor(sy),fx=sx-ix,fy=sy-iy;let value=0;
+  for(let dy=0;dy<2;dy++)for(let dx=0;dx<2;dx++){
+    const ax=Math.max(0,Math.min(mw-1,ix+dx)),ay=Math.max(0,Math.min(mh-1,iy+dy)),v=masks[index*n+ay*mw+ax];
+    if(!Number.isFinite(v))throw Error('Invalid subject mask logits');
+    value+=v*(dx?fx:1-fx)*(dy?fy:1-fy);
   }
-  return result.sort((a,b)=>b.pixels-a.pixels);
+  return value;
+}
+
+function logistic(value){
+  if(value>=12)return 1;if(value<=-12)return 0;
+  return 1/(1+Math.exp(-value));
+}
+
+// EdgeSAM is a boundary refiner, not the foreground authority. Confident matte
+// foreground/background is immutable; SAM only reweights the uncertainty band.
+export function refineSubjectMatte(masks,mw,mh,scores,matte,width,height,orientation){
+  const {dw,dh,angle,mirror}=geometry(width,height,orientation),source=matte?.confidence;
+  if(!(source instanceof Uint8Array)||source.length!==width*height||matte.width!==width||matte.height!==height
+    ||!(masks instanceof Float32Array)||!Number.isInteger(mw)||!Number.isInteger(mh)||mw<1||mh<1
+    ||masks.length!==scores.length*mw*mh||!scores.length)throw Error('Invalid subject matte output');
+  if(matte.appleConfidence!==undefined&&(!(matte.appleConfidence instanceof Uint8Array)||matte.appleConfidence.length!==source.length))
+    throw Error('Invalid Apple matte confidence geometry');
+  let fgTotal=0;for(const value of source)if(value>=MATTE_FOREGROUND)fgTotal++;
+  if(fgTotal<16)return {matte:{...matte,confidence:source.slice()},report:{applied:false,reason:'insufficient-matte-foreground'}};
+
+  let best=null;
+  for(let i=0;i<scores.length;i++){
+    const score=scores[i];if(!Number.isFinite(score)||score<.70)continue;
+    let candidatePixels=0,fgHit=0,bgHit=0,uncertainHit=0;
+    for(let y=0;y<dh;y++)for(let x=0;x<dw;x++){
+      const logit=rawMaskSample(masks,i,mw,mh,dw,dh,x,y);if(logit<=0)continue;
+      const p=storedIndex(x,y,dw,dh,width,height,angle,mirror),value=source[p];
+      candidatePixels++;
+      if(value>=MATTE_FOREGROUND)fgHit++;
+      else if(value<=MATTE_BACKGROUND)bgHit++;
+      else uncertainHit++;
+    }
+    if(!candidatePixels)continue;
+    const recall=fgHit/fgTotal,intrusion=bgHit/candidatePixels,coverage=candidatePixels/(dw*dh);
+    if(recall<.30||intrusion>.30||coverage>.75)continue;
+    const rank=recall*2+score-intrusion*2-Math.max(0,coverage-.50);
+    if(!best||rank>best.rank)best={index:i,score,rank,recall,intrusion,coverage,uncertainHit};
+  }
+  if(!best)return {matte:{...matte,confidence:source.slice()},report:{applied:false,reason:'no-matte-constrained-mask'}};
+
+  const confidence=source.slice(),refinementConfidence=new Uint8Array(source.length);let changed=0;
+  for(let y=0;y<dh;y++)for(let x=0;x<dw;x++){
+    const p=storedIndex(x,y,dw,dh,width,height,angle,mirror),original=source[p];
+    const sam=Math.round(logistic(rawMaskSample(masks,best.index,mw,mh,dw,dh,x,y))*255);
+    refinementConfidence[p]=sam;
+    if(original>=MATTE_FOREGROUND||original<=MATTE_BACKGROUND)continue;
+    // Confident SAM background must be able to reject an uncertain IS-Net
+    // proposal completely. A weighted average alone leaves a high proposal
+    // above the background threshold even when SAM assigns zero foreground.
+    const appleFloor=matte.appleConfidence?.[p]??0;
+    const refined=Math.max(appleFloor,sam<=MATTE_BACKGROUND?Math.min(original,sam):Math.round(original*.35+sam*.65));
+    if(refined!==confidence[p]){confidence[p]=refined;changed++;}
+  }
+  return {
+    matte:{...matte,confidence,refinementConfidence,source:matte.source==='fused'?'fused':'edge-refined'},
+    report:{applied:changed>0,changed,model:'EdgeSAM-3x',score:best.score,recall:best.recall,
+      backgroundIntrusion:best.intrusion,coverage:best.coverage}
+  };
 }

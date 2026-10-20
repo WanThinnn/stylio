@@ -22,6 +22,28 @@ MODEL-LICENSE.txt and PRO-MODEL-LICENSE.txt. Artifact URLs, sizes and SHA-256
 checksums are recorded in assets.json. Model version alone does not guarantee
 better hair or Portrait Lighting in Apple's renderer.
 
+### Portrait foreground and boundary models
+
+Standard and Pro share the same IS-Net global 1024 input, matte-guided EdgeSAM-3x
+pass, matte-depth fusion and autofocus. Only their Depth Anything model differs.
+The Pro-only local crop experiment was removed after iPhone testing. Lite skips
+IS-Net and uses Apple PEM/skin guidance when present; without guidance it keeps
+generated depth without running unconstrained subject discovery.
+
+IS-Net uses `Ko033/isnet-general-use-onnx`, revision
+`5a3f3a4ad0d6fe586bc5b293ded13f5212390c24`, Apache-2.0. Its FP16 ONNX weights
+are 88,141,111 bytes, SHA-256
+`0857167263ad816d67c26852b99c2861e46a86c9a889527061a5eb2a6f90d32c`.
+`foreground-assets.json` pins its source, input/output names, normalization and
+hash; `tools/download-foreground-matte.mjs` verifies the downloaded bytes.
+EdgeSAM's encoder/decoder remain pinned in `assets.json`; their S-Lab 1.0 notice
+and the owner's personal, non-commercial use scope remain unchanged.
+
+Models run sequentially in terminated workers; model bytes, not live sessions,
+are cached. Optional foreground/refinement failure retains existing guidance or
+depth, while parent cancellation propagates. Source mattes remain untouched;
+the generated matte is used internally and is not injected into the HEIC.
+
 
 ### Local AI Detail models
 

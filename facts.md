@@ -6951,3 +6951,47 @@ C/D downloads use the same LAN route/port8775 and original expiry20:57:39;
 server was restarted only after verifying its own command line, new PID12800.
 Both HEAD responses200 with the exact lengths above. Do not silently extend this
 session beyond2026-10-20T13:57:39.960Z.
+
+## 10.173 — Accepted matte-depth fusion and final tier scope (2026-10-21)
+
+This supersedes the integration status in 10.172. The app now uses the dominant
+full Apple Portrait Effects Matte as foreground guidance, with skin as fallback
+anchor/protection, IS-Net general foreground proposals, matte-guided EdgeSAM-3x,
+and foreground-conditioned depth fusion. Generated additions stay uncertain
+until boundary refinement can confirm them. Original source matte payloads are
+preserved; no new AI matte is injected into HEIC. Autofocus comes from a stable
+interior point of the accepted foreground and uses existing stored/display
+orientation transforms in preview and export.
+
+The key sequence v3-v6 fixed split-skin finger loss, ring depth discontinuity,
+rigid skin transitions and background texture falsely kept at finger focus.
+The user accepts v6 as approximately 99% Native on the tested key image. This
+does not prove arbitrary-scene segmentation or metric depth accuracy. Details,
+reproductions and device feedback are in
+docs/web/2026-10-21-matte-fusion-v2-regression.md.
+
+A subsequent Pro-only IS-Net/EdgeSAM crop stage was rejected on iPhone: the
+leather fob blurred and an area inside the metal ring stayed sharp. It has been
+removed. Final explicit user decision: Standard and Pro share the accepted v6
+IS-Net 1024, EdgeSAM pass, matte fusion, edge protection and autofocus. Only
+Depth Anything differs: V2 Small FP32 for Standard, V3 Small FP32 for Pro.
+Different depth-model predictions can still produce different rendering.
+Lite skips IS-Net; with no usable Apple PEM/skin guidance it keeps generated
+depth alone. A no-matte SAM fallback is deferred, not implemented with a grid.
+
+IS-Net uses the verified FP16 asset pinned in foreground-assets.json; bytes,
+SHA-256, preprocessing and license are documented in docs/models/ai-assets.md.
+Models run sequentially in terminated workers. Optional IS-Net/EdgeSAM internal
+watchdog failures now preserve accepted guidance/depth and report fallback;
+parent cancellation still aborts. Tests reproduce this distinction with the
+real worker watchdog and exercise shared Standard/Pro orchestration.
+
+Pre-commit verification on master: 134 Portrait/model/orchestration tests plus
+151 protected pipeline/application/release tests pass; 8 optional fixture cases
+skip. PWA/i18n/diff checks pass. A fresh actual Standard browser export is
+byte-exact with accepted v6 (2,371,695 bytes); source audits retain all 122
+non-EXIF item payloads/properties, 17 original references, alternative groups
+and Style MakerNote 0x54. Styles/Texture/HDR production modules are unchanged.
+Private photos, outputs and inference arrays remain outside tracked files.
+The user requests cleanup and a commit directly on master; no push or production
+deployment is requested in this step. Development cache is v241.

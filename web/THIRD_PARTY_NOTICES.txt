@@ -27,6 +27,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
+IS-Net foreground matting (opt-in AI Portrait)
+Source: https://github.com/xuebinqin/DIS
+ONNX conversion: https://huggingface.co/Ko033/isnet-general-use-onnx
+Pinned revision: 5a3f3a4ad0d6fe586bc5b293ded13f5212390c24
+License: Apache License 2.0; full text is retained in
+vendor/ai-portrait/MODEL-LICENSE.txt.
+Photos are processed on the device; only model files are downloaded.
+
 EdgeSAM subject segmentation (opt-in AI Portrait)
 Source: https://github.com/chongzhou96/EdgeSAM
 Author-provided ONNX weights: https://huggingface.co/spaces/chongzhou/EdgeSAM

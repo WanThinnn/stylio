@@ -119,7 +119,8 @@ export function portraitPreview(result,host,strings,onSettings,{onPending=()=>{}
   const state=document.createElement('p');state.className='ai-preview-state';state.setAttribute('role','status');
   host.append(toolbar,photosInfo,frame,instruction,aperture.element,state);
   const showUpdating=busy=>{host.setAttribute('aria-busy',String(busy));};
-  let x=.5,y=.5,displayX=.5,displayY=.5,pending=null,timer=null,version=0,disposed=false,lastCommitted=0,inFlight=null,lastPortraitAperture=DEFAULT_APERTURE;
+  const initialFocus=result.suggestedFocus||{x:.5,y:.5,displayX:.5,displayY:.5};
+  let x=initialFocus.x,y=initialFocus.y,displayX=initialFocus.displayX,displayY=initialFocus.displayY,pending=null,timer=null,version=0,disposed=false,lastCommitted=0,inFlight=null,lastPortraitAperture=DEFAULT_APERTURE;
   const syncPortraitState=()=>{
     const enabled=selectedAperture(blur)!==null;
     portraitToggle.setAttribute('aria-pressed',String(enabled));
@@ -182,7 +183,7 @@ export function portraitPreview(result,host,strings,onSettings,{onPending=()=>{}
   blur.addEventListener('input',()=>{selectPhotoMode('aperture');if(selectedAperture(blur)!==null)lastPortraitAperture=Number(blur.value);syncPortraitState();changed();});
   blur.addEventListener('change',commit);
   centerFocus.addEventListener('click',()=>{focus(.5,.5);commit();});
-  reset.addEventListener('click',()=>{selectPhotoMode('aperture');blur.value=String(DEFAULT_APERTURE);lastPortraitAperture=DEFAULT_APERTURE;aperture.update();syncPortraitState();focus(.5,.5);commit();});
+  reset.addEventListener('click',()=>{selectPhotoMode('aperture');blur.value=String(DEFAULT_APERTURE);lastPortraitAperture=DEFAULT_APERTURE;aperture.update();syncPortraitState();focus(initialFocus.displayX,initialFocus.displayY);commit();});
   syncPortraitState();draw();
   // Histories can contain many photos. Keep live GPU contexts only for previews
   // that are visible; their canvas snapshots and settings survive suspension.

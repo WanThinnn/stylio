@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "model": "isnet-general-use-fp16-web",
+  "license": "Apache-2.0",
+  "source": "https://huggingface.co/Ko033/isnet-general-use-onnx",
+  "revision": "5a3f3a4ad0d6fe586bc5b293ded13f5212390c24",
+  "files": {
+    "isnet-general-use-fp16.onnx": {
+      "url": "https://huggingface.co/Ko033/isnet-general-use-onnx/resolve/5a3f3a4ad0d6fe586bc5b293ded13f5212390c24/onnx/model_fp16.onnx",
+      "bytes": 88141111,
+      "sha256": "0857167263ad816d67c26852b99c2861e46a86c9a889527061a5eb2a6f90d32c",
+      "input": {
+        "name": "input_image",
+        "dtype": "float32",
+        "shape": [
+          1,
+          3,
+          "height",
+          "width"
+        ],
+        "normalization": "v/255-0.5"
+      },
+      "output": {
+        "name": "output_image",
+        "dtype": "float32",
+        "shape": [
+          1,
+          1,
+          "height",
+          "width"
+        ],
+        "postprocess": "minmax"
+      },
+      "notes": "Auxiliary outputs stripped; MaxPool ceil_mode fixed; dynamic spatial input."
+    }
+  }
+}
