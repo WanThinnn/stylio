@@ -2,10 +2,10 @@
 
 **English** · [Tiếng Việt](docs/readme/README.vi.md) · [简体中文](docs/readme/README.zh-CN.md)
 
-**Stylio** - a name formed from Styles and Elio - is an open-source, on-device photo processing tool focused on interoperability with Apple Photos: Photographic Styles, iOS 27 Texture/Grain, AI-powered Portrait, and preserving as much original photo data as possible.
+**Stylio** - a name formed from Styles and Elio - is an open-source, on-device photo processing tool focused on interoperability with Apple Photos: Photographic Styles, iOS 27 Texture/Grain, HDR interoperability, AI-powered Portrait, and preserving as much original photo data as possible.
 
 > [!NOTE]
-> Current version: **[v1.0.0 — Release notes](release_note/v1.0.0.md)**<br>
+> Current version: **[v1.1.0 — Release notes](release_note/v1.1.0.md)**<br>
 > Independent and open-source. Not affiliated with Apple.
 
 ## Try it
@@ -15,6 +15,15 @@
 Stylio runs locally in your browser. Your photos are not uploaded.
 
 On iPhone, add Stylio to the Home Screen for the full-screen PWA experience.
+
+## What's new in v1.1.0
+
+- **Edited native Styles reconstruction** for supported iPhone 16/17 Photos Current exports, retaining the selected Style while adding Texture/Grain and preserving supported HDR editing resources.
+- **Third-party HDR JPEG compatibility**, including the tested Adobe RGB gain-map / Project Indigo workflow, with rebuilt base + gain data for more reliable HDR colour after supported Photos edits.
+- **More natural AI Portrait** using available Apple matte guidance, IS-Net foreground matting and matte-guided EdgeSAM-3x refinement for thin edges, held objects, fingers and other difficult foreground boundaries.
+- **Improved Portrait metadata and HDR preservation**, including the quick Portrait/ƒ toggle, editable aperture on validated exports, native depth calibration when available, source-aware generated-depth geometry and better HDR behaviour.
+- **Refined AI tiers and reliability:** Standard uses Depth Anything V2 Small FP32, Pro uses Depth Anything V3 Small FP32, and both share the same accepted foreground/refinement pipeline with sequential worker cleanup and graceful fallback.
+- **Release notes inside Settings:** tap **App version** to read the current release notes in-app, including offline after the required assets have been cached.
 
 ## Preview
 
@@ -29,9 +38,10 @@ On iPhone, add Stylio to the Home Screen for the full-screen PWA experience.
 
 ## Main features
 
-- **Photographic Styles porting** for supported older-iPhone HEIC photos.
+- **Photographic Styles porting** for supported older-iPhone HEIC photos, plus reconstruction of supported edited-native iPhone 16/17 Styles exports.
 - **Texture & Grain** metadata support for the iOS 27 Photos editing controls.
-- **AI Portrait / Depth Effect** with editable aperture and Portrait Lighting on supported outputs.
+- **HDR import and preservation** for supported native HEIC resources and compatible gain-map JPEG workflows, including tested third-party camera output.
+- **AI Portrait / Depth Effect** with editable aperture, Portrait Lighting, foreground refinement and source-aware depth geometry on supported outputs.
 - **Smart Enhance** features including local detail restoration and Adaptive Styles analysis.
 - **Original-data preservation** for existing HEIC/HDR/Portrait/Styles resources whenever the source provides them.
 - **HEIC, JPEG, PNG and DNG** input support in the browser workflow.

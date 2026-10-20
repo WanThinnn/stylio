@@ -2,10 +2,10 @@
 
 [English](../../README.md) · **Tiếng Việt** · [简体中文](README.zh-CN.md)
 
-**Stylio** - tên gọi được ghép từ Styles và Elio - là công cụ xử lý ảnh mã nguồn mở, chạy trực tiếp trên thiết bị, tập trung vào khả năng tương thích với Apple Photos: Photographic Styles, Texture/Grain của iOS 27, Portrait bằng AI và bảo toàn tối đa dữ liệu gốc của ảnh.
+**Stylio** - tên gọi được ghép từ Styles và Elio - là công cụ xử lý ảnh mã nguồn mở, chạy trực tiếp trên thiết bị, tập trung vào khả năng tương thích với Apple Photos: Photographic Styles, Texture/Grain của iOS 27, HDR, Portrait bằng AI và bảo toàn tối đa dữ liệu gốc của ảnh.
 
 > [!NOTE]
-> Phiên bản hiện tại: **[v1.0.0 — Ghi chú phát hành](../../release_note/v1.0.0.md)**<br>
+> Phiên bản hiện tại: **[v1.1.0 — Ghi chú phát hành](../../release_note/v1.1.0.md)**<br>
 > Phát triển độc lập và mã nguồn mở. Không liên kết với Apple.
 
 ## Dùng thử
@@ -15,6 +15,15 @@
 Stylio xử lý ảnh ngay trên trình duyệt; ảnh của bạn không được tải lên máy chủ.
 
 Trên iPhone, nên thêm Stylio vào Màn hình chính để dùng dưới dạng PWA toàn màn hình.
+
+## Có gì mới trong v1.1.0
+
+- **Tái dựng native Styles đã chỉnh sửa** cho các Photos Current export được hỗ trợ từ iPhone 16/17, giữ Style đang được chọn khi thêm Texture/Grain và bảo toàn các tài nguyên HDR chỉnh sửa tương thích.
+- **Cải thiện HDR JPEG từ ứng dụng camera bên thứ ba**, gồm luồng Adobe RGB gain-map / Project Indigo đã kiểm thử; base image và gain data được dựng lại cùng nhau để giữ màu HDR ổn định hơn sau các chỉnh sửa được hỗ trợ trong Photos.
+- **AI Portrait tự nhiên hơn** nhờ kết hợp matte có sẵn của Apple với IS-Net và EdgeSAM-3x có matte guidance, cải thiện biên mảnh, vật thể cầm trên tay, ngón tay và các vùng foreground khó.
+- **Cải thiện metadata, hình học và HDR của Portrait**, gồm nút Portrait/ƒ nhanh, khẩu độ có thể chỉnh trên output đã xác thực, giữ camera calibration của native depth khi có và dùng hình học phù hợp nguồn cho generated depth.
+- **Tinh chỉnh AI tier và độ ổn định:** Standard dùng Depth Anything V2 Small FP32, Pro dùng Depth Anything V3 Small FP32; cả hai chia sẻ cùng foreground/refinement pipeline, giải phóng worker theo từng stage và fallback khi model phụ lỗi.
+- **Đọc release notes ngay trong Settings:** chạm **App version** để xem ghi chú phát hành hiện tại trong Stylio, kể cả offline sau khi các asset cần thiết đã được cache.
 
 ## Giao diện
 
@@ -29,9 +38,10 @@ Trên iPhone, nên thêm Stylio vào Màn hình chính để dùng dưới dạn
 
 ## Tính năng chính
 
-- **Port Photographic Styles** cho ảnh HEIC từ các iPhone cũ được hỗ trợ.
+- **Port Photographic Styles** cho ảnh HEIC từ các iPhone cũ được hỗ trợ, đồng thời tái dựng các edited-native Styles export phù hợp từ iPhone 16/17.
 - **Texture & Grain** cho các điều khiển chỉnh sửa mới trên iOS 27.
-- **AI Portrait / Depth Effect** với khẩu độ và Portrait Lighting có thể tiếp tục chỉnh trong Photos trên output phù hợp.
+- **Import và bảo toàn HDR** cho tài nguyên HEIC native được hỗ trợ và các gain-map JPEG tương thích, gồm output từ ứng dụng camera bên thứ ba đã kiểm thử.
+- **AI Portrait / Depth Effect** với khẩu độ, Portrait Lighting, foreground refinement và depth geometry theo ảnh nguồn trên output phù hợp.
 - **Smart Enhance** gồm phục hồi chi tiết cục bộ và Adaptive Styles.
 - **Bảo toàn dữ liệu gốc** như HEIC/HDR/Portrait/Styles khi ảnh nguồn có sẵn.
 - Hỗ trợ luồng xử lý **HEIC, JPEG, PNG và DNG** trên web.
