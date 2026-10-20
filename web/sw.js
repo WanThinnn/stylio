@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v241`;
+const CACHE_NAME = `${CACHE_PREFIX}v242`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -15,6 +15,11 @@ const APP_SHELL = [
   "./styles/components/controls.css",
   "./styles/components/materials.css",
   "./styles/components/sheets.css",
+  "./styles/components/release-notes.css",
+  "./src/ui/release-notes.js",
+  "./src/app/version.js",
+  "./VERSION",
+  "./release-notes/v1.1.0.md",
   "./styles/components/results.css",
   "./styles/components/portrait-editor.css",
   "./src/ui/shell/app-shell.js",
@@ -220,7 +225,7 @@ const APP_SHELL = [
 
 // Only the initial screen gates activation. Preloading the whole converter
 // here left first visits waiting for every rarely-used processing module.
-const BOOT_SHELL=['./','./index.html','./styles.css',"./styles/foundations/tokens.css","./styles/foundations/base.css","./styles/layout/app-shell.css","./styles/layout/workspace.css","./styles/components/controls.css","./styles/components/sheets.css","./styles/components/results.css","./styles/components/portrait-editor.css","./src/ui/shell/app-shell.js",'./src/ui/page-bootstrap.js','./src/ui/i18n.js','./src/ui/ai-strings.js','./icons/photographic-styles.svg','./styles/components/materials.css','./THIRD_PARTY_NOTICES.txt','./src/ui/shell/dock-viewport.js','./src/ui/shell/tab-glass.js','./styles/components/navigation-effects.css'];
+const BOOT_SHELL=['./','./index.html','./styles.css',"./styles/foundations/tokens.css","./styles/foundations/base.css","./styles/layout/app-shell.css","./styles/layout/workspace.css","./styles/components/controls.css","./styles/components/sheets.css","./styles/components/results.css","./styles/components/portrait-editor.css","./src/ui/shell/app-shell.js",'./src/ui/page-bootstrap.js','./src/ui/i18n.js','./src/ui/ai-strings.js','./icons/photographic-styles.svg','./styles/components/materials.css','./THIRD_PARTY_NOTICES.txt','./src/ui/shell/dock-viewport.js','./src/ui/shell/tab-glass.js','./styles/components/navigation-effects.css','./styles/components/release-notes.css'];
 BOOT_SHELL.push('./src/ui/processing-preferences.js','./src/ui/shell/sheet-gestures.js','./src/ui/shell/sheet-frame.js');
 self.addEventListener("install", (event) => {
   event.waitUntil(

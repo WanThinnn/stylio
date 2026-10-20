@@ -5,6 +5,7 @@ import {bindDockViewport} from './dock-viewport.js';
 import {bindTabGlass} from './tab-glass.js';
 import {bindSheetDismissGesture} from './sheet-gestures.js';
 import {bindContinuousSheetFrame} from './sheet-frame.js';
+import {createReleaseNotes} from '../release-notes.js';
 
 let instance;
 export function getAppShell(){return instance??=createAppShell();}
@@ -155,8 +156,9 @@ export function createAppShell({doc=document,win=window,translate=key=>t(pickLan
   for(const button of tabs)button.addEventListener('click',()=>navigate(button.dataset.screen));
   bindTabGlass({nav:tabNav,tabs,select:navigate,win,doc});
   win.addEventListener?.('resize',syncTabLens);
-  for(const [trigger,id]of [['open-ai-settings','ai-settings']]){
-    const sheet=$(id);
+  const releaseNotes=createReleaseNotes({doc,win,translate});
+  for(const [trigger,id]of [['open-ai-settings','ai-settings'],['open-release-notes','release-notes']]){
+    const sheet=$(id);if(!sheet||!$(trigger))continue;
     const frame=bindContinuousSheetFrame({sheet,win});
     let closingTimer;
     const later=win.setTimeout?.bind(win)||setTimeout,clearLater=win.clearTimeout?.bind(win)||clearTimeout;
@@ -170,6 +172,7 @@ export function createAppShell({doc=document,win=window,translate=key=>t(pickLan
       for(const other of doc.querySelectorAll('dialog[open]'))if(other!==sheet)other.close();
       if(closingTimer!==undefined){clearLater(closingTimer);closingTimer=undefined;}
       sheet.classList.remove('is-closing');sheet.showModal();frame.refresh();sheet.focus({preventScroll:true});
+      if(id==='release-notes')void releaseNotes?.load();
     });
     bindSheetDismissGesture({sheet,close:closeSheet,win});
     sheet.querySelector('[data-close-dialog]')?.addEventListener('click',closeSheet);

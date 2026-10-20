@@ -62,6 +62,11 @@ jobs:
       - name: Check the PWA is internally consistent
         run: node tests/web/check-pwa.mjs
 
+      - name: Check version and release notes match their editable sources
+        run: |
+          node tools/sync-release-info.mjs --check
+          node --test tests/web/release-notes.mjs
+
       - name: Check browser module and worker paths
         run: node --test tests/web/module-paths.mjs
 

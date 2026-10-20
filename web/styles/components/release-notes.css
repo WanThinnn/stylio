@@ -1,0 +1,50 @@
+.release-notes-sheet { width: min(740px,calc(100% - 40px)); height: min(860px,88dvh); max-height: 88dvh }
+.release-notes-sheet>.sheet-header { border-bottom: .5px solid var(--line) }
+.release-notes-body { padding: 0 20px 28px }
+.release-hero { padding: 26px 12px 24px; text-align: center }
+.release-app-icon { display: block; width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 17px; box-shadow: var(--icon-tile-shadow) }
+.release-app-icon img { display: block; width: 100%; height: 100%; border-radius: inherit }
+.release-app-icon .release-icon-dark { display: none }
+@media(prefers-color-scheme:dark) {
+  :root:not([data-theme="light"]) .release-icon-light { display: none }
+  :root:not([data-theme="light"]) .release-app-icon .release-icon-dark { display: block }
+}
+:root[data-theme="dark"] .release-icon-light { display: none }
+:root[data-theme="dark"] .release-app-icon .release-icon-dark { display: block }
+.release-hero h1 { margin: 0 0 10px; font-size: 1.875rem; font-weight: 750; letter-spacing: -.045em; line-height: 1.15 }
+.release-document p { font-size: .9375rem; line-height: 1.65; color: var(--muted); margin: 12px 0 }
+.release-hero>p { font-size: .8125rem; margin: 10px auto; max-width: 38rem }
+.release-hero>p:first-of-type { display: inline-block; padding: 9px 16px; border-radius: 16px; background: var(--surface); border: .5px solid var(--line); line-height: 1.65 }
+.release-document strong { color: var(--fg); font-weight: 600 }
+.release-document a { color: var(--accent-text); text-decoration: none; text-underline-offset: 3px }
+.release-document a:hover { text-decoration: underline }
+.release-document a:focus-visible,.release-table-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px }
+.release-document code { padding: 2px 5px; border-radius: 5px; background: var(--surface-secondary); color: var(--fg); font-size: .86em; overflow-wrap: anywhere }
+.release-card { padding: 20px; margin-bottom: 14px; border-radius: 22px; background: var(--surface); box-shadow: inset 0 0 0 .5px var(--line) }
+.release-card h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; font-size: 1.0625rem; font-weight: 650; line-height: 1.35; letter-spacing: -.015em }
+.release-section-number { flex: none; display: grid; place-items: center; width: 32px; height: 32px; font-size: .75rem; font-weight: 700; border-radius: 10px; background: var(--icon-blue-bg); color: var(--icon-blue-fg) }
+.release-card ul { margin: 0; padding: 0 0 0 19px }
+.release-card li { padding-left: 4px; margin: 0 0 14px; font-size: .9375rem; line-height: 1.65; color: var(--muted) }
+.release-card li::marker { color: var(--accent-text); font-size: .8em }
+.release-card li:last-child { margin-bottom: 0 }
+.release-table-wrap { overflow-x: auto; margin: 18px 0; border: .5px solid var(--line); border-radius: 14px; overscroll-behavior-x: contain }
+.release-table-wrap table { width: 100%; border-collapse: collapse; font-size: .8125rem; line-height: 1.5; text-align: left }
+.release-table-wrap th { background: var(--surface-secondary); color: var(--fg); font-weight: 600 }
+.release-table-wrap th,.release-table-wrap td { padding: 12px; border-bottom: .5px solid var(--line); min-width: 90px; vertical-align: top }
+.release-table-wrap td { color: var(--muted) }
+.release-table-wrap tbody tr:last-child td { border-bottom: 0 }
+.release-notes-state { margin: 28px 12px; color: var(--muted); text-align: center; line-height: 1.5 }
+.release-notes-retry { display: block; margin: 16px auto; min-height: 44px; padding: 10px 20px; border: 0; border-radius: var(--capsule-radius); color: var(--accent-text); background: var(--surface); font: 600 .9375rem var(--sans) }
+#open-release-notes { cursor: pointer }
+#open-release-notes:active { background: var(--surface-secondary) }
+@media(max-width:767px) {
+  .release-notes-sheet { width: auto; height: calc(100dvh - env(safe-area-inset-top,0px) - 28px); max-height: calc(100dvh - env(safe-area-inset-top,0px) - 28px) }
+  .release-notes-body { padding: 0 14px max(24px,env(safe-area-inset-bottom,0px)) }
+  .release-hero { padding: 24px 8px 20px }
+  .release-card { padding: 18px }
+}
+@media(max-width:600px) {
+  #release-notes { --sheet-bottom-gap: 8px; border-radius: 40px }
+  #release-notes[data-continuous-frame] { border: 0; border-radius: 0; box-shadow: none }
+  #release-notes[data-continuous-frame]>.sheet-frame { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none }
+}

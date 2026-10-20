@@ -6,7 +6,7 @@ const css=readFileSync(entry,'utf8');
 const paths=[...css.matchAll(/@import url\("([^"]+)"\);/g)].map(match=>match[1]);
 const worker=readFileSync(new URL('../../web/sw.js',import.meta.url),'utf8');
 test('flat CSS entry is small, ordered, locally resolvable and available on cold offline boot',()=>{
-  assert.equal(paths.length,10);assert.ok(css.split('\n').length<15);
+  assert.equal(paths.length,11);assert.ok(css.split('\n').length<15);
   assert.match(paths[0],/foundations\/tokens/);assert.match(paths[1],/foundations\/base/);
   const boot=worker.match(/const BOOT_SHELL=(.*);/)[1];
   for(const path of paths){
@@ -199,7 +199,8 @@ test('settings follows iOS grouped rows with language navigation, appearance pre
   assert.match(html,/id="full-cleanup"/);
   assert.match(html,/settings\.fullcleanuphint/);
   assert.match(sheets,/\.settings-icon-red \{[^}]*#ff3b30/s);
-  assert.match(html,/id="version">1\.0\.0</);
+  assert.match(html,/id="version"><\/span>/,'version is filled from the generated VERSION module');
+  assert.match(html,/id="open-release-notes"[^>]*aria-haspopup="dialog"/);
   assert.match(bootstrap,/registration\?\.update\?\.\(\)/);
   assert.match(bootstrap,/stylio-result-preview-v1/);
   assert.match(bootstrap,/photographic-style-port-/);

@@ -32,7 +32,8 @@ import {
   linearLumaFromRgb, LIGHTMAP_N,
 } from "./styles.js";
 
-export const VERSION = "1.0.0";
+import {VERSION} from '../app/version.js';
+export {VERSION};
 
 // Every rejection a visitor can hit reduces to one of two things: the file is not a
 // HEIC at all, or it is a HEIC this build cannot handle. Nothing else is actionable.

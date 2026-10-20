@@ -45,10 +45,10 @@ function harness({blockedStorage=false,initialState=null,deferBack=false,thumbna
   for(const id of ['photo-workspace','photo-content','close-photo','photo-title','settings-screen','guide-screen','history-search','toggle-search','history-search-field','clear-search','search-button-label','history-search-summary','history-no-matches','.app-tabs','.app-dock','header-guide','open-ai-settings','ai-settings','depth-model','history-items','history-empty','history-count','current-task','task-content','process-screen','history-screen']){
     const el=new Element();nodes.set(id,el);doc.body.append(el);
   }
-  for(const id of ['task-summary','history-queue-summary','history-queue-note']){const el=new Element();nodes.set(id,el);doc.body.append(el);}
+  for(const id of ['task-summary','history-queue-summary','history-queue-note','open-release-notes','release-notes']){const el=new Element();nodes.set(id,el);doc.body.append(el);}
   const main=new Element('main');main.scrollTop=0;nodes.set('main',main);doc.body.append(main);
   const tabs=['process','history','guide','settings'].map(name=>{const el=new Element('button');el.dataset.screen=name;doc.body.append(el);return el;});
-  const sheets=['ai-settings'].map(id=>nodes.get(id));
+  const sheets=['ai-settings','release-notes'].map(id=>nodes.get(id));
   for(const sheet of sheets){const button=new Element('button');button.closeButton=true;sheet.append(button);}
   const storage=new Map(),entries=[initialState];let cursor=0,pendingBack;
   const win=new EventTarget();win.scrollY=0;win.scrollTo=(_x,y)=>win.scrollY=y;
@@ -225,6 +225,19 @@ test('AI controls remain a quick modal sheet rather than a navigation destinatio
   assert.equal(h.$('ai-settings').open,true);
   assert.equal(h.doc.activeElement,h.$('ai-settings'),'dialog surface owns initial focus instead of the close button');
   assert.equal(h.$('process-screen').hidden,false);
+});
+
+test('App version opens release notes in a dismissible sheet without leaving Settings',()=>{
+  const h=harness();h.tabs[3].click();h.$('open-release-notes').click();
+  assert.equal(h.$('release-notes').open,true);
+  assert.equal(h.$('settings-screen').hidden,false);
+  assert.equal(h.doc.activeElement,h.$('release-notes'));
+  h.$('release-notes').querySelector('[data-close-dialog]').click();
+  assert.equal(h.$('release-notes').open,false);
+  assert.equal(h.$('settings-screen').hidden,false);
+  h.$('open-release-notes').click();
+  h.$('release-notes').dispatchEvent(new Event('cancel',{cancelable:true}));
+  assert.equal(h.$('release-notes').open,false);
 });
 
 test('reload discards stale photo history state instead of reusing it for a new session result',()=>{

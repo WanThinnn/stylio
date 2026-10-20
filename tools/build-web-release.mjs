@@ -3,6 +3,8 @@ import {cp,mkdir,readFile,readdir,writeFile} from 'node:fs/promises';
 import {resolve,relative,extname,isAbsolute,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
+import {existsSync} from 'node:fs';
+import {syncReleaseInfo} from './sync-release-info.mjs';
 
 export async function buildWebRelease(source,output,revision){
   if(!/^[a-f0-9]{7,40}$/.test(revision))throw Error('Provide a Git commit SHA for the release');
@@ -12,6 +14,7 @@ export async function buildWebRelease(source,output,revision){
     throw Error('Release output must be outside the source directory');
   await mkdir(output,{recursive:true});
   await cp(source,output,{recursive:true});
+  if(existsSync(resolve(source,'VERSION')))await syncReleaseInfo(source,output);
   async function visit(directory){
     for(const entry of await readdir(directory,{withFileTypes:true})){
       const file=resolve(directory,entry.name),path=relative(output,file).replaceAll('\\','/');
