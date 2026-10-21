@@ -95,6 +95,35 @@ test('Indigo ICC v2 descriptions identify Display P3 without an alternate gain-m
  assert.deepEqual(hdr.baseIcc,profile);assert.equal(hdr.primaries,'smpte432');
 });
 
+test('unsupported colour profile errors expose the actual base/alternate labels, not a guessed device cause',()=>{
+ assert.throws(()=>extractJpegHdr(jpegFixture(false,{baseProfile:icc('Unknown RGB'),alternateProfile:alternateIcc})),error=>{
+  assert.equal(error.code,'err.hdrjpeg');
+  assert.match(error.message,/Unsupported HDR JPEG colour profiles/);
+  assert.match(error.message,/Unknown RGB/);
+  assert.match(error.message,/Display P3; SMPTE ST 2084 PQ/);
+  assert.deepEqual(error.hdrProfiles,{base:'Unknown RGB',alternate:'Display P3; SMPTE ST 2084 PQ',baseBytes:icc('Unknown RGB').length,alternateBytes:alternateIcc.length});
+  return true;
+ });
+});
+
+test('Photos Display P3 base with a BT.2100 PQ HDR rendition retains distinct profiles and gain metadata',()=>{
+ const pq=icc('Rec. ITU-R BT.2100 PQ'),jpeg=jpegFixture(false,{alternateProfile:pq});
+ const hdr=extractJpegHdr(jpeg);
+ assert.equal(hdr.primaries,'smpte432','the SDR base remains P3, not BT.2020');
+ assert.deepEqual(hdr.baseIcc,baseIcc);assert.deepEqual(hdr.alternateIcc,pq);
+ assert.deepEqual(hdrJpegAlternateColr(hdr),iccColr(pq),'retain the actual alternate ICC instead of relabelling it P3');
+ assert.deepEqual(hdr.metadata,parseAdaptiveHdrXmp(xmp()));
+ assert.equal(hdr.metadata.useBaseColorSpace,true,'numeric gain applies in the linear base colour space');
+});
+
+test('recognizing the Photos PQ alternate does not admit unknown profiles or unsupported SDR bases',()=>{
+ for(const name of ['Unknown RGB','Rec. ITU-R BT.2100 HLG','Rec. ITU-R BT.2100 PQ unknown']){
+  assert.throws(()=>extractJpegHdr(jpegFixture(false,{alternateProfile:icc(name)})),{code:'err.hdrjpeg'});
+ }
+ assert.throws(()=>extractJpegHdr(jpegFixture(false,{baseProfile:icc('Rec. ITU-R BT.2100 PQ'),alternateProfile:icc('Rec. ITU-R BT.2100 PQ')})),{code:'err.hdrjpeg'});
+ assert.throws(()=>extractJpegHdr(jpegFixture(false,{alternateProfile:null})),{code:'err.hdrjpeg'});
+});
+
 test('HDR rendition colour uses the source ICC or historical extended-linear source primaries',()=>{
  assert.deepEqual(hdrJpegAlternateColr({alternateIcc}),iccColr(alternateIcc));
  for(const[primaries,expected]of [['smpte432',12],['bt709',1]]){
@@ -316,8 +345,9 @@ test('third-party scalar/RGB HDR remains an ISO rendition through Texture and Po
  }
  }
 });
-test('HEIC carries distinct HDR tiles, original XMP/ICC, a tmap derivation and preferred HDR alternative',()=>{
- const hdr=extractJpegHdr(jpegFixture()),profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta);
+for(const alternateProfile of [alternateIcc,icc('Rec. ITU-R BT.2100 PQ')]){
+test(`HEIC/Portrait preserves original HDR tiles, XMP and distinct rendition ICC (${alternateProfile.length} bytes)`,()=>{
+ const hdr=extractJpegHdr(jpegFixture(false,{alternateProfile})),profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta);
  for(const p of pd.props.properties)if(p.type==='irot')profile.meta[p.box.off+p.box.hdr]=0;
  const geometry={...targetGeometry({width:600,height:900}),exifOrientation:1};
  const main=Array.from({length:geometry.primaryTiles},(_,i)=>Uint8Array.of(1,i));
@@ -366,3 +396,4 @@ test('HEIC carries distinct HDR tiles, original XMP/ICC, a tmap derivation and p
  const pv=new DataView(portrait.buffer,portrait.byteOffset+pa.off+pa.hdr);
  assert.equal(pv.getUint32(12),pt);assert.equal(pv.getUint32(16),p.primary);
 });
+}

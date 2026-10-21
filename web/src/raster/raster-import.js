@@ -846,7 +846,7 @@ async function encodeYuvGrid(yuv,width,height,columns,rows,color,stage,onProgres
 }
 
 async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,styleRecommendation=null,styleSuggestion=null}) {
-  let opened,enhanced;
+  let opened,enhanced,phase='metadata';
   try {
     const sourceExif=extractRasterExif(sourceBytes),orientation=readExifOrientation(sourceExif??new Uint8Array())||1;
     const swap=orientation>=5,width=swap?hdr.height:hdr.width,height=swap?hdr.width:hdr.height;
@@ -858,7 +858,8 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     geometry.primaryColumns=Math.ceil(width/TILE);geometry.primaryRows=Math.ceil(height/TILE);
     geometry.primaryTiles=geometry.primaryColumns*geometry.primaryRows;
     if(geometry.primaryTiles>48||geometry.hdrColumns*geometry.hdrRows>12)throw hdrJpegError('HDR JPEG exceeds the preserved-image tile budget');
-    await ensureHevcEncoder(onProgress);
+    phase='encoder-load';await ensureHevcEncoder(onProgress);
+    phase='synthetic-assets';
     const assets=await generateSyntheticHevc(onProgress);
     let profile=buildGeneratedProfile('48-12',assets);
     // The dedicated JPEG route encodes normalized upright planes, not the SDR
@@ -867,7 +868,7 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     for(const property of pd.props.properties)if(property.type==='irot')profile.meta[property.box.off+property.box.hdr]=0;
     const color={primaries:hdr.primaries,transfer:'iec61966-2-1',matrix:'smpte170m',fullRange:true};
     const colorSpace=hdr.primaries==='smpte432'?'display-p3':'srgb';
-    opened=await openHdrBaseImage(hdr,orientation,colorSpace,onProgress);
+    phase='base-decode';opened=await openHdrBaseImage(hdr,orientation,colorSpace,onProgress);
     let working=opened.image,detailSkipped=null,rebase=null,decodedGain=null;
     if(detail){
       try{
@@ -890,17 +891,19 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
         enhanced=null;rebase=null;working=opened.image;
       }
     }
+    phase='style-suggestion';
     const suggested=styleRecommendation!==undefined&&styleRecommendation!==null
       ?{recommendation:styleRecommendation,error:null}
       :await suggestStyleForImage(working,styleSuggestion,onProgress);
     const styled=applyRasterStyleRecommendation(profile,suggested.recommendation);profile=styled.profile;
     const styleDisplayRendered=Boolean(styled.recommendation&&shouldRenderStyleDisplay(styled.recommendation));
-    const linearThumbnail=await encodeLinearThumbnail(working,{angle:0},onProgress);
+    phase='linear-thumbnail';const linearThumbnail=await encodeLinearThumbnail(working,{angle:0},onProgress);
+    phase='thumbnail';
     const thumb=await encodeCanvases(geometry.thumbWidth,geometry.thumbHeight,1,
       ctx=>{ctx.drawImage(working,0,0,geometry.thumbWidth,geometry.thumbHeight);
         if(styleDisplayRendered)renderStyleDisplayCanvas(ctx,geometry.thumbWidth,geometry.thumbHeight,styled.recommendation);},
       800_000,undefined,onProgress);
-    let main;
+    let main;phase='main-tiles';
     if(enhanced||styleDisplayRendered)main=await encodeHdrCanvasTiles(working,geometry,color,colorSpace,onProgress,
       styleDisplayRendered?styled.recommendation:null);
     else{
@@ -908,7 +911,7 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
       main=await encodeYuvGrid(decoded.bytes,decoded.width,decoded.height,
         geometry.primaryColumns,geometry.primaryRows,color,'main',onProgress);
     }
-    let gain;
+    let gain;phase='gain-tiles';
     if(rebase){
       const gainYuv=rgbaToI420(rebase.rgba,gainWidth,gainHeight,color);
       gain=await encodeYuvGrid(gainYuv,gainWidth,gainHeight,
@@ -920,6 +923,7 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     }
     let appleHdr=null;
     if(hdr.metadata.channels.length===3){
+      phase='apple-gain';
       decodedGain??=await decodeJpegYuv(hdr.gain,{width:hdr.gainWidth,height:hdr.gainHeight,orientation},onProgress);
       const gainRgba=rebase?.rgba??yuv420ToRgba(decodedGain.bytes,gainWidth,gainHeight);
       const baseRgba=readManagedRgba(working,gainWidth,gainHeight,colorSpace);
@@ -931,6 +935,7 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
       appleHdr={chunks:encodedApple.chunks,hvcc:encodedApple.hvcc,
         headroom:converted.headroom,colr:nclx(2,2,6,true)};
     }
+    phase='assemble';
     const data=buildRasterHeic(profile,{main:main.chunks,mainHvcc:main.hvcc,
       mainColr:hdr.baseIcc?iccColr(hdr.baseIcc):rasterColr(color),
       thumb:thumb.chunks[0],thumbHvcc:thumb.hvcc,thumbColr:thumb.colr,linearThumbnail,
@@ -943,6 +948,7 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     // Photos does not preserve this RGB legacy auxiliary reliably after saving.
     // Rebase both SDR and scalar gain, as validated on the physical Indigo case.
     // This call is confined to freshly imported RGB HDR JPEGs, never Native HEIC.
+    phase='editable-hdr';
     const editable=appleHdr?await makeRgbHdrEditable(data,{headroom:appleHdr.headroom,primaries:hdr.primaries},onProgress):null;
     const outputGeometry=editable?{...geometry,hdrWidth:width,hdrHeight:height,
       hdrColumns:geometry.primaryColumns,hdrRows:geometry.primaryRows}:geometry;
@@ -953,6 +959,10 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     if(rebase)result.hdrDetail={clipped:rebase.clipped,components:rebase.components,maxError:rebase.maxError};
     if(enhanced)enhanced.width=enhanced.height=0;
     return result;
-  }catch(error){if(!error.code)error.code='err.hdrjpeg';throw error;}
+  }catch(error){
+    const failure=error&&typeof error==='object'?error:new Error(String(error));
+    if(!failure.code)failure.code='err.hdrjpeg';
+    failure.hdrStage??=phase;throw failure;
+  }
   finally{opened?.close();if(enhanced)enhanced.width=enhanced.height=0;}
 }

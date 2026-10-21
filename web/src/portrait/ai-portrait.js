@@ -44,7 +44,7 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         try{
           inferred=await inferDepth(rgbSample(source,used.width,used.height),used,{signal,provider:candidateProvider,modelId,
             onProgress:(stage,progress)=>onProgress(candidateProvider==='wasm'&&stage==='inference'?'inferenceCpu':stage,progress),
-            guidance:{rgb:previewRgb,person:appleMatte?.confidence??null,width,height}});
+            guidance:{rgb:previewRgb,person:appleMatte?.confidence??null,width,height,orientation}});
           usedProvider=candidateProvider;break providerLoop;
         }catch(error){
           lastError=error;signal?.throwIfAborted();
@@ -102,10 +102,14 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
       // Keep every valid skin component. Protection still intersects the final
       // foreground, so skin alone cannot expand the accepted subject.
       const protectionMatte=skinMatte;
-      const fused=fusePortraitDepth(gray,matte,width,height,{protectionMatte});gray=fused.gray;
+      // A generated foreground label does not establish shared focus distance.
+      // Keep scene geometry unless an accepted Apple PEM/skin ownership anchor
+      // supports the existing device-tested person/held-object focus fusion.
+      const preserveGeometry=!focusAnchor;
+      const fused=fusePortraitDepth(gray,matte,width,height,{protectionMatte,preserveGeometry,rgb:previewRgb});gray=fused.gray;
       foregroundReport.depth={...fused.report,protectionSource:protectionMatte?.source??null};
       subjectReport={...fused.report,foreground:true,edge:foregroundReport.edge??null};
-      const focus=foregroundFocusPoint(matte,width,height);
+      const focus=foregroundFocusPoint(matte,width,height,preserveGeometry?{gray}:{});
       if(focus){
         const display=storedPointToDisplay(focus.x,focus.y,orientation.angle,orientation.mirror);
         suggestedFocus={x:focus.x,y:focus.y,displayX:display.x,displayY:display.y,confidence:focus.confidence};

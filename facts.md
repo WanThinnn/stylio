@@ -7153,3 +7153,260 @@ allowlisted LAN page http://192.168.1.3:8783/ expires at 16:47:05 Asia/Bangkok o
 2026-10-21. Every full LAN download returns 200 and SHA256-matches its source;
 unknown names return 404. Photos f/1.4/f/16, refocus, save/reopen, and viewer/Edit
 regression verification on the V3 candidates is pending. No commit/push/deploy.
+
+## 10.177 — IDG remains iPhone-specific; region-level model comparison (2026-10-21)
+
+Remote origin/master now includes scene response commit d7cdc1b and release-note
+sync a53bca6 (verified directly with ls-remote). The previous no-push statement
+describes the state at the end of 10.176, not the present remote state.
+
+User reports IDG err.hdrjpeg persists on iPhone while the laptop now succeeds.
+Actual desktop import -> Portrait Standard passes for the 20251020 input. The
+same file also passes with WebCodecs disabled AND both browser JPEG decoders
+forced to fail (software-only import, 3024x4032, 3.83289 stops). The 20260208
+input passes software-only import too (3016x4024, 3.906139 stops). These checks
+do not reproduce iPhone API/resource limits; the underlying native exception
+is still missing. No unverified memory/colour workaround is declared a fix.
+
+A diagnostic change annotates HDR transfer phase and preserves the original
+exception, then exposes that phase/reason beneath the generic warning, retaining
+the end of long codec logs. Tests fail first for missing phase, hidden reason,
+and a lost final codec error, then pass. No incomplete output or SDR downgrade
+is produced. Cache v245. Asked user whether to push this diagnostic version for
+an iPhone repro; not pushed as of this entry.
+
+Six new unmodified depth fixtures form three pairs with identical primary
+samples and matching non-depth auxiliary resources. These files already contain
+AI depth, rather than untouched camera-depth captures. Saved maps confirm the
+reported regional disagreement. 2277 Pro suitcase is -11 codes from focus vs
+2278 Standard +2, while faces are -2/-3. 2287 Pro wipes are +64 vs 2288 Standard
+-1, but Standard also places a sampled wall +41 codes nearer than focus. Codes
+are relative and require range/optics for cross-tier response comparisons.
+
+Real pre-fusion/final/matte replays use the iPhone inference-size budget in the
+desktop runtime, not native Safari. Suitcase is outside both final masks (median
+0), so fusion leaves its depth unchanged. Wipes are also outside (median mask 4):
+Pro raw 241 -> final 241, Standard 169 -> 169. The local error already exists in
+model output; unsupported adjacent objects also do not join the protected focus
+group. Whole-map tier superiority cannot be inferred. Production models/grouping
+remain unchanged; no filename-specific corrections, forced tier swap, second
+model or whole-table flattening added.
+
+Diagnostic tools now record opt-in raw/final/matte arrays only through a loopback
+server, and independently render source/depth rather than Photos-baked previews.
+All photographic/audit data remain private. One supplied 13 Pro Max output has a
+libheif-incompatible thumbnail->tmap link; only a private replay copy removes that
+link, with samples retained. This is separate from the IDG JPEG import symptom.
+
+60 focused HDR/raster/native preservation/application/diagnostic tests pass.
+PWA/diff checks pass. Further explanation and reproducible commands are in
+docs/web/2026-10-21-idg-safari-depth-regions.md. iPhone repro remains required.
+
+User explicitly declines pushing the diagnostic build. Keep all new diagnostic
+changes local; do not push them without renewed authorization. A further 145
+Portrait/legacy-compatibility tests pass. The generic iPhone IDG failure remains
+unresolved; desktop success and a downloadable desktop-generated file are not a
+claim of fixing the iPhone import path.
+
+## 10.178 — Phone exposes the IDG colour-profile rejection (2026-10-21)
+
+The user screenshot now shows `HDR JPEG [metadata]: Unsupported HDR JPEG colour
+profiles`, and confirms selecting from Photos. This attempt is rejected by
+extractJpegHdr before encoder/Portrait, not a reproduced memory/codec failure.
+The three local copies still parse: original 2,623,701 bytes (Adobe metadata,
+548-byte v2 base ICC, no alternate ICC), versus the copied/private HDR input
+2,612,099 bytes (channel metadata, 536-byte v4 base ICC, 13,312-byte alternate).
+Both classify as P3. Different Photos-provided input or old client code remains
+unresolved; the source selector alone does not prove a transcode occurred.
+
+Local v246 colour-profile rejection now reports JSON-escaped base/alternate
+description strings and retains their ICC byte lengths on error.hdrProfiles.
+The new diagnostic test first fails for hidden labels, then passes; 20 JPEG/HDR
+diagnostic tests and the module-path check pass. Direct tunnel fetch confirms
+the JPEG parser matches local code and includes the diagnostics. Asked for a
+refresh/retry and the base/alternate labels, or the exact Photos-supplied JPEG.
+No ICC names guessed, validation bypassed, source photos changed or code pushed.
+
+## 10.179 — Photos P3 / BT.2100 PQ rejection reproduced and repaired locally (2026-10-21)
+
+The 19:35 iPhone screenshot identifies base="Display P3" and
+alternate="Rec. ITU-R BT.2100 PQ". A synthetic description-only MPF fixture
+reproduces that exact error in extractJpegHdr before the fix. The P3 branch
+incorrectly required the alternate ICC description to start `Display P3;`.
+v247 recognizes the observed BT.2100 PQ alternate while leaving the P3 base
+primaries unchanged. Original ICC bytes, gain data, XMP and numeric metadata
+are retained; no alternate relabelling, HDR-to-SDR fallback or guessed gain
+adjustment is added. Unknown profiles and missing alternate ICC still fail.
+
+The exact-profile regression passes after the fix. Additional assembly,
+Portrait and scalar-rebase/Texture graph tests retain the distinct alternate
+ICC byte-for-byte. 130 focused tests and PWA checks pass. Synthetic profiles
+prove metadata acceptance/transport, not colour accuracy. Direct tunnel fetch
+confirms v247 and byte-equivalent JPEG parser source. User asked to retry from
+Photos on iPhone; physical-device import and HDR rendering remain unconfirmed.
+No push or source-photo mutation. The exact Photos-provided JPEG bytes have
+not been captured; desktop fixture success is not claimed as iPhone validation.
+
+Fresh real desktop import + Portrait Standard f/16 passes in 39.949 seconds:
+2,612,099-byte existing P3/PQ JPEG -> 14,518,403-byte 3024x4032 HEIC, capacity
+3.83289 stops. Private output tests/private-fixtures/IDG-v247-smoke.HEIC is
+optionally served on LAN port 8785 for two hours (until 21:44:29 local time).
+This is not the exact BT.2100/PQ Photos input or evidence of phone repair.
+
+## 10.180 — IDG device retry confirmed (2026-10-21)
+
+The user confirms IDG now runs normally on iPhone after reloading the local
+v247 build. This confirms the reported import failure is cleared in their
+retry; it is not a separate explicit HDR colour-parity measurement. No new
+push is authorized. Focus returns to depth optimization.
+
+## 10.181 — Depth worker was inferring sideways HEIF pixels (2026-10-21)
+
+All three supplied comparison scenes have canonical rotation 270. Source
+decoding correctly restores stored coordinates, but V2/V3 previously inferred
+those sideways pixels while IS-Net/EdgeSAM used display orientation. A real
+worker regression reproduces wrong tensor dimensions on Standard/Pro before
+the fix; caller regression shows orientation missing from guidance.
+
+Local v248 losslessly orients RGB before inference and maps float depth back
+to stored coordinates before edge refinement/PEM/fusion/export. Tests cover
+Lite/Standard/Pro and all 12 rotation/mirror combinations. No model, filename
+policy, blur scale or input budget changes; no second model or parallel GPU
+session is introduced. Native camera depth remains outside generated inference.
+
+Same-source Pro mobile-budget desktop replays improve final code gaps:
+suitcase -9 -> -3, brown bag -4 -> +1, wipes +80 -> +2. These are relative
+8-bit depth codes, not metres or cross-model physical blur radii. Wall/table
+ordering remains questionable and needs further work/device validation.
+
+Six real-browser candidates (3 scenes x Standard/Pro, initial f/1.4) preserve
+every non-depth HEVC payload plus Styles/linear thumbnail/colour profiles.
+Only private replay copies remove the prior generated depth; production still
+refuses replacing existing depth. Identical inherited focus-sidecar duplicates
+are removed only from private candidates. All six encoded readbacks pass.
+LAN port 8786 serves exactly those six files until 22:04:36 local; responses
+are byte-identical to disk, unlisted routes 404. No user original overwritten.
+
+293 regression cases: 285 pass, 8 missing-fixture skips, 0 fail. PWA/diff checks
+pass. New design/evidence: docs/web/2026-10-21-depth-upright-inference.md.
+No push; Photos native-equivalent blur and whole-scene accuracy are not claimed.
+
+## 10.182 — Separate unanchored foreground membership from focus distance (2026-10-21)
+
+User supplies Downloads/v248 (camera Portrait 2311, non-Portrait 2310, Standard
+2312, Pro 2313) and requests ownership/focus, optics verification and edge/
+occlusion work. They explicitly decline new Photos-based blur calibration.
+Native/non-native workflow protection remains mandatory; no push requested.
+
+Outer rendered images and unmodified resources confirm Standard's table blur.
+Actual same-source replay raw can 225/table 214/rear bag 152 becomes can 154/
+table 214/bag 151 after old fusion; autofocus lands on the bag. Semantic
+foreground incorrectly became one focus plane. Native and ordinary frames are
+separate captures, not aligned ground truth; no fitting to native blur is used.
+
+Final local v250 keeps scene geometry when there is no accepted Apple PEM/skin
+ownership anchor. Confident interior/background samples stay exact. A
+population-supported, spatially coherent near depth layer can supply autofocus;
+hierarchical histogram splits handle multiple layers without per-tier or
+per-file thresholds. Continuous surfaces and specks fail closed. RGB/SAM may
+corroborate a bounded local correction only in uncertain rims; background holes
+are not filled. No new model, crop stage or concurrent inference is introduced.
+
+The established Apple-anchored fusion/focus path remains unchanged. Fresh
+suitcase Pro mobile-budget replay has raw, matte and final arrays byte-identical
+to the accepted v248 upright replay. Actual camera Portrait IMG_2311 keeps
+camera depth payload/auxC and optical/rendering sidecar bytes through native
+Texture. The old original iPhone 7 directory is no longer present; no fresh
+original replay is claimed and processed copies are not used in its place.
+
+Scene-v3 blur mapping, projection, bokeh and HDR-calibration production code
+are unchanged. Actual 2310 exports preserve all 93 non-depth HEVC payloads,
+Styles/linear thumbnail/delta/HDR grids, colour profiles and EXIF optics.
+Source 4032x3024 / rotation270 / 15.66mm / 120mm equivalent agrees with encoded
+virtual intrinsics/pixel size. New tests lock optics and photo resources across
+focus/aperture edits. This remains estimated optics, not measured metric depth.
+
+Real browser final candidates: Standard can225/table214/bag152, Pro
+can206/table204/bag176. Both autofocus on the can, not the rear bag. Initial
+f/1.4; all confident geometry matches raw through lossless encode/readback.
+Private audit tests/private-fixtures/v249/audit.mjs defaults to version v250.
+Two private files are on LAN port8787 until22:50:23 local, with byte-verified
+downloads and 404 for unlisted paths. No originals overwritten, no photos in
+tracked web/git. The existing HTTPS tunnel serves final v250 modules.
+
+300 focused regressions:292 pass,8 missing-fixture skips,0 fail; PWA/diff pass.
+See docs/web/2026-10-21-portrait-scene-geometry.md. Device bokeh/icon/re-edit/HDR
+validation is still pending; do not claim universal/native-equivalent accuracy.
+
+### 10.183 General scene-depth surface optimization (local v251, 2026-10-21)
+
+User reports v250 silhouette erosion at wide apertures and explicitly rejects
+per-image/object rules. They approve a common confidence-weighted RGB/matte/
+depth optimizer, requiring current HDR, Styles, Texture, native/non-native
+pipelines to remain intact. No push requested.
+
+Only the unanchored AI scene-geometry repair is replaced: freeze corroborated
+occlusion cuts, reconstruct from reliable same-side local surface fits, and
+solve an affinity-weighted quadratic with depth-order box constraints. No
+filename, can-specific coordinates, object labels or per-tier tuning. Semantic
+foreground does not mean equal focus depth. No additional model/GPU stage.
+Existing Apple-anchored fusion/focus and camera-depth passthrough are unchanged.
+Blur mapping, optical projection and HDR/Styles/Texture production modules are
+not edited by this implementation; prior local fixes remain preserved.
+
+Four shape-based erosion regressions first fail, then pass. A curved-shoulder
+red test catches unsafe unconstrained extrapolation and motivates general
+occlusion constraints. One configuration passes 1,000 seeded varied scenes,
+background/core immutability, planes, holes, thin structures, layers, transpose
+and mobile scratch-budget tests. This is synthetic stress coverage, not proof
+of real-photo/native parity. Solver can retain unsupported observations and
+does not recover a surface missed by all guidance models.
+
+Actual original IMG_2310 rim replay reduces local surface disagreement
+Standard23->1 and Pro13->0 codes; this is a private annotated depth check,
+not an Apple Photos-rendering assertion. Both fresh HEIC exports retain 93
+non-depth image payloads, HDR/Styles/delta/linear thumbnail, colour/EXIF optics
+and orientation. Lossless decoded depth matches an independent replay;
+background samples, established focus, interior planes and disparity ranges
+stay intact. Native IMG_2311 Texture retains its camera depth/calibration;
+suitcase Apple-anchored raw/matte/final are byte-identical to accepted v250.
+
+310 focused tests:302 pass,8 missing-fixture skips,0 fail; PWA/diff pass.
+Only two original-source candidate files shared at LAN port8788, expiring
+23:28:59 local on2026-10-21, with full-download byte verification. Existing
+HTTPS test tunnel serves exact v251 modules; refresh running tabs. No commit
+or push. Physical iPhone f/4->f/1.4, f/16/Off, icon/re-edit/HDR validation remains
+required. Details: docs/web/2026-10-21-confidence-surface-depth.md.
+
+### 10.184 Remaining rim erosion and adaptive support (local v252, 2026-10-21)
+
+User physically tests v251 and reports remaining cap/rim erosion. Continue
+within the approved generic optimizer; HDR, Styles, Texture, native/non-native
+branches and blur/optical algorithms remain unchanged. No push authorized.
+
+Red tests reproduce reflective fragments isolated by false hard cuts and
+contaminated depth transitions wider than the old fixed band. v252 estimates
+support extent from one-sided depth curvature above a measured interior noise
+floor. Reconsider only unsupported, silhouette-incident fragment cuts; retain
+supported surfaces and enclosed inset layers. Compatible affine interior
+samples are pinned rather than perturbed by a wider fit. A preconditioned,
+accelerated projected solver checks the constrained fixed-point residual;
+bounded support/typed-scratch and small-scale fallback remain in place. No
+filename/object/tier special case, new model, extra inference or GPU stage.
+
+Fresh original IMG_2310 replays use identical raw depth/RGB/matte/SAM inputs to
+v251. A remaining cap annotation improves Standard22->5, Pro17->3 relative
+codes against its local surface; not physical-depth/native-blur ground truth.
+Some model-depth discrepancies remain. Both exports retain 93 non-depth image
+payloads, HDR/Styles/linear/delta grids, colour/EXIF optics and orientation;
+decoded depth matches independent reconstruction. Background and inspected
+interior plane samples stay exact. Pro autofocus moves within the can layer.
+Actual camera Portrait Texture retains camera depth/calibration, and suitcase
+Apple-anchored raw/matte/final remain byte-identical to accepted v250 replay.
+
+313 regressions:305 pass,8 missing-fixture skips,0 fail. The existing 1,000-scene
+synthetic stress set passes; do not equate it with universal real-image accuracy.
+PWA/diff checks pass. v252 private original-source Standard/Pro files are shared
+on LAN port8789 until01:56:21 local on2026-10-22; downloads byte-verified. No
+commit/push. Physical iPhone Photos wide-aperture, f16/Off, icon/edit/HDR checks
+remain required. See docs/web/2026-10-21-adaptive-depth-support.md.

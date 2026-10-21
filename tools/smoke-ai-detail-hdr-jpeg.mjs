@@ -9,6 +9,7 @@
  * --source-root=<snapshot-root> serves web/src from an isolated historical
  * snapshot while keeping large runtime assets and private inputs local.
  * --decode-fallback rejects browser JPEG decode to exercise the FFmpeg base path.
+ * --software-only disables WebCodecs to exercise the software HEVC path.
  * --allow-sdr --portrait [--aperture=16] tests a fresh ordinary JPEG through
  * raster import and the real Portrait controller, without a previous export.
  */
@@ -31,6 +32,7 @@ const portraitInput=process.argv.find(arg=>arg.startsWith('--portrait-input='))?
 const portraitInputFull=portraitInput?resolve(root,portraitInput):null;
 const bitmapFallback=process.argv.includes('--bitmap-fallback');
 const decodeFallback=process.argv.includes('--decode-fallback');
+const softwareOnly=process.argv.includes('--software-only');
 const allowSdr=process.argv.includes('--allow-sdr');
 const portrait=Boolean(portraitInput)||process.argv.includes('--portrait');
 const aperture=Number(process.argv.find(arg=>arg.startsWith('--aperture='))?.slice(11)||'4.5');
@@ -116,7 +118,7 @@ try{
  await cdp('Runtime.enable');await cdp('Page.enable');await sleep(1000);
  const base='http://127.0.0.1:'+port;
  const cfg={base,input:'/__input__',inputName:inputFull.split(/[\\/]/).at(-1),model,detail,
-   portraitInput:portraitInput?'/__portrait_input__':null,portrait,aperture,allowSdr,bitmapFallback,decodeFallback,save:Boolean(saveFull)};
+   portraitInput:portraitInput?'/__portrait_input__':null,portrait,aperture,allowSdr,bitmapFallback,decodeFallback,softwareOnly,save:Boolean(saveFull)};
  const expression='(async cfg=>{'+
    "const [{importRaster},{discoverHeic,extractItemData},{parseTmapMetadata}]=await Promise.all(["+
    "import(cfg.base+'/web/src/raster/raster-import.js'),"+
@@ -126,6 +128,7 @@ try{
    "const events=[],started=performance.now();"+
    "const name=cfg.inputName;"+
    "const sourceFile=new File([source],name,{type:'image/jpeg'});"+
+   "if(cfg.softwareOnly){globalThis.VideoEncoder=undefined;globalThis.VideoFrame=undefined;}"+
    "if(cfg.decodeFallback){globalThis.createImageBitmap=()=>Promise.reject(Error('forced JPEG decoder failure'));globalThis.Image=class{set src(value){}decode(){return Promise.reject(Error('forced JPEG element failure'));}};}"+
    "const result=cfg.portraitInput?{hdr:true,data:new Uint8Array(await fetch(cfg.base+cfg.portraitInput).then(r=>r.arrayBuffer()))}:await importRaster(sourceFile,null,"+
    "progress=>{if(progress.stage&&(!events.length||events.at(-1)!==progress.stage))events.push(progress.stage);},"+

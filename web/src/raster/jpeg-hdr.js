@@ -174,8 +174,18 @@ export function extractJpegHdr(bytes) {
  const metadata=parseAdaptiveHdrXmp(gain.xmp),baseIcc=iccProfile(base),alternateIcc=adobe?null:iccProfile(gain);
  const baseName=iccName(baseIcc),alternateName=iccName(alternateIcc);
  const primaries=!baseIcc||/sRGB/i.test(baseName)?'bt709':/^Display P3$/.test(baseName)?'smpte432':null;
- if(!primaries||(!adobe&&(!alternateIcc||!(primaries==='smpte432'?/^Display P3;/.test(alternateName):/sRGB|Rec\. ?709/i.test(alternateName)))))
-  fail('Unsupported HDR JPEG colour profiles');
+ // Photos may supply a P3 SDR base with a BT.2100/PQ HDR rendition. These
+ // profiles describe different renditions, not a requirement for equal gamuts.
+ // Keep base primaries for gain calculations and retain the alternate ICC
+ // verbatim on the tmap; never relabel the alternate as the base colour space.
+ const supportedAlternate=primaries==='smpte432'
+  ?/^Display P3;/.test(alternateName)||alternateName==='Rec. ITU-R BT.2100 PQ'
+  :/sRGB|Rec\. ?709/i.test(alternateName);
+ if(!primaries||(!adobe&&(!alternateIcc||!supportedAlternate))){
+  const error=hdrJpegError(`Unsupported HDR JPEG colour profiles (base=${JSON.stringify(baseName.slice(0,96))}, alternate=${JSON.stringify(alternateName.slice(0,96))})`);
+  error.hdrProfiles={base:baseName,alternate:alternateName,baseBytes:baseIcc?.length??0,alternateBytes:alternateIcc?.length??0};
+  throw error;
+ }
  // Gain-map ICC describes the alternate HDR rendition (e.g. P3/PQ), not the
  // numerical gain samples. Decode samples without browser ICC/HDR tone mapping.
  // Remove the now-stale MPF pointer from the isolated base stream. Some browser

@@ -4,6 +4,7 @@ import {refineDepth} from './ai-depth-refinement.js';
 import {depthWorkerFailure} from './ai-inference.js';
 import {protectPersonDepth} from './person-depth-guidance.js';
 import {depthModel,asDisparity} from './depth-models.js';
+import {depthImageInput,depthOutputToStored} from './depth-orientation.js';
 self.onmessage = async ({data: {rgb, input, guidance,provider='webgpu',modelId='standard'}}) => {
   let session, outputs, inputTensor,stage='modelLoading';
   try {
@@ -31,15 +32,17 @@ self.onmessage = async ({data: {rgb, input, guidance,provider='webgpu',modelId='
     stage='modelLoading';self.postMessage({stage});
     session = await ort.InferenceSession.create(files[0], {executionProviders:[provider],
       ...(selected.rank===5?{externalData:[{path:'model.onnx_data',data:files[1]}]}:{})});files.length=0;
-    const count = input.width * input.height, tensor = new Float32Array(3 * count);
+    const image=depthImageInput(rgb,input.width,input.height,guidance?.orientation);
+    const count = image.width * image.height, tensor = new Float32Array(3 * count);
     const mean = [.485,.456,.406], std = [.229,.224,.225];
-    for(let p=0;p<count;p++)for(let c=0;c<3;c++)tensor[c*count+p]=(rgb[p*3+c]/255-mean[c])/std[c];
+    for(let p=0;p<count;p++)for(let c=0;c<3;c++)tensor[c*count+p]=(image.rgb[p*3+c]/255-mean[c])/std[c];
     stage='inference';self.postMessage({stage});
-    inputTensor=new ort.Tensor('float32',tensor,selected.rank===5?[1,1,3,input.height,input.width]:[1,3,input.height,input.width]);
+    inputTensor=new ort.Tensor('float32',tensor,selected.rank===5?[1,1,3,image.height,image.width]:[1,3,image.height,image.width]);
     outputs = await session.run({[session.inputNames[0]]:inputTensor},['predicted_depth']);
     inputTensor.dispose();inputTensor=null;
-    const output = outputs.predicted_depth, values = asDisparity(new Float32Array(await output.getData()),selected.kind);
-    const mh=output.dims.at(-2),mw=output.dims.at(-1);
+    const output = outputs.predicted_depth;
+    const {values,mw,mh}=depthOutputToStored(asDisparity(new Float32Array(await output.getData()),selected.kind),
+      output.dims.at(-1),output.dims.at(-2),guidance?.orientation);
     for(const value of Object.values(outputs))value.dispose();outputs=null;await session.release();session=null;
     if(guidance){
       stage='refining';self.postMessage({stage});

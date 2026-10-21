@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v244`;
+const CACHE_NAME = `${CACHE_PREFIX}v252`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -8,6 +8,8 @@ const DEPTH_ASSET_CACHE = 'photographic-style-depth-assets-4472b736-ort-1.22.0';
 // Warm the complete offline converter after startup. Only BOOT_SHELL below
 // gates installation, so first visits do not wait for the whole module graph.
 const APP_SHELL = [
+  "./src/portrait/scene-depth-optimizer.js",
+  "./src/portrait/depth-orientation.js",
   "./styles/foundations/tokens.css",
   "./styles/foundations/base.css",
   "./styles/layout/app-shell.css",

@@ -224,23 +224,65 @@ function distanceInside(confidence,width,height,threshold=MATTE_FOREGROUND){
   return d;
 }
 
-export function foregroundFocusPoint(matte,width,height){
+// A generated saliency matte may join a small near object to a larger object
+// behind it. Only a substantial, clearly bimodal depth population can select
+// a nearer focus layer. Search supported near sub-populations too: three scene
+// layers must not be forced into a two-class subject/background interpretation.
+// This selects a point; it never edits depth or ownership.
+function foregroundDepthLayer(confidence,gray,width,height){
+  if(!(gray instanceof Uint8Array)||gray.length!==confidence.length)throw Error('Invalid foreground focus depth geometry');
+  const histogram=new Uint32Array(256);let total=0;
+  for(let p=0;p<gray.length;p++)if(confidence[p]>=MATTE_FOREGROUND){histogram[gray[p]]++;total++;}
+  if(total<32)return null;
+  const minimum=Math.max(16,Math.ceil(total*.08)),candidates=[];
+  for(let lower=0;lower<255;){
+    let count=0,sum=0,squares=0;
+    for(let code=lower;code<256;code++){count+=histogram[code];sum+=histogram[code]*code;squares+=histogram[code]*code*code;}
+    const variance=count?squares-sum*sum/count:0;
+    if(count<2*minimum||variance<=0)break;
+    let lowCount=0,lowSum=0,best=null;
+    for(let code=lower;code<255;code++){
+      lowCount+=histogram[code];lowSum+=histogram[code]*code;
+      const highCount=count-lowCount;if(lowCount<minimum||highCount<minimum)continue;
+      const low=lowSum/lowCount,high=(sum-lowSum)/highCount,gap=high-low,between=lowCount*highCount/count*gap*gap;
+      if(!best||between>best.between)best={code,low,high,gap,between};
+    }
+    if(!best)break;
+    const split=(best.low+best.high)/2;let valley=0;
+    for(let code=Math.max(lower,Math.ceil(split-best.gap*.1));code<=Math.min(255,Math.floor(split+best.gap*.1));code++)valley+=histogram[code];
+    if(best.between/variance>=.8&&best.gap>=Math.max(6,3*Math.sqrt(Math.max(0,(variance-best.between)/count)))
+      &&valley/count<=.05)candidates.push({split,separation:best.gap});
+    lower=best.code+1;
+  }
+  for(const candidate of candidates.reverse()){
+    const selected=new Uint8Array(confidence.length);
+    for(let p=0;p<gray.length;p++)if(gray[p]>candidate.split)selected[p]=confidence[p];
+    const components=componentsAt(selected,width,height),component=components[0];
+    if(component?.pixels>=minimum)return {confidence:selected,components,...candidate,componentPixels:component.pixels};
+  }
+  return null; // no discrete substantial layer, or only scattered near outliers
+}
+
+export function foregroundFocusPoint(matte,width,height,{gray=null}={}){
   const input=matteInput(matte,width,height,'focus');
   if(!input)return null;
-  const components=componentsAt(input.confidence,width,height);
+  const layer=gray?foregroundDepthLayer(input.confidence,gray,width,height):null;
+  const confidence=layer?.confidence??input.confidence;
+  const components=layer?.components??componentsAt(confidence,width,height);
   if(!components.length)return null;
   const dominant=components[0];
-  const distance=distanceInside(input.confidence,width,height);
+  const distance=distanceInside(confidence,width,height);
   let best=-1,bestDistance=-1,bestConfidence=-1;
   for(const p of dominant.indices){
-    const d=distance[p],c=input.confidence[p];
+    const d=distance[p],c=confidence[p];
     if(d>bestDistance||(d===bestDistance&&c>bestConfidence)||(d===bestDistance&&c===bestConfidence&&p<best)){
       best=p;bestDistance=d;bestConfidence=c;
     }
   }
   if(best<0)return null;
   const x=best%width,y=Math.floor(best/width);
-  return {x:(x+.5)/width,y:(y+.5)/height,distance:bestDistance,confidence:bestConfidence,componentPixels:dominant.pixels};
+  return {x:(x+.5)/width,y:(y+.5)/height,distance:bestDistance,confidence:bestConfidence,componentPixels:dominant.pixels,
+    ...(layer?{selection:'near-depth-layer',depthSplit:layer.split,depthSeparation:layer.separation}:{})};
 }
 
 function pickSpaced(candidates,count,width,height){

@@ -131,6 +131,42 @@ test('foregroundFocusPoint lies in the deepest confident foreground interior',()
   assert.ok(x>=4&&x<=6&&y>=4&&y<=6);
 });
 
+test('geometry-aware autofocus selects a supported nearer foreground layer instead of the thick rear object',()=>{
+ const w=100,h=80,confidence=new Uint8Array(w*h),gray=new Uint8Array(w*h).fill(80);
+ for(let y=12;y<61;y++)for(let x=5;x<57;x++){const p=y*w+x;gray[p]=145+Math.floor(y/12);confidence[p]=250;}
+ for(let y=19;y<68;y++)for(let x=52;x<73;x++){const p=y*w+x;gray[p]=220+Math.floor(y/20);confidence[p]=250;}
+ const input={confidence,width:w,height:h,source:'edge-refined'},before=confidence.slice();
+ const ordinary=foregroundFocusPoint(input,w,h);
+ assert.ok(ordinary.x<.52,'reproduces largest-interior selection on the rear object');
+ const point=foregroundFocusPoint(input,w,h,{gray});
+ assert.ok(point.x>=.52&&point.x<.73,'a substantial, separate near layer supplies the initial focus');
+ assert.ok(gray[Math.floor(point.y*h)*w+Math.floor(point.x*w)]>=220);
+ assert.deepEqual(confidence,before,'focus selection cannot erase source matte membership');
+});
+
+test('geometry-aware focus does not split a continuous surface or chase a small near outlier',()=>{
+ const w=80,h=60,confidence=new Uint8Array(w*h),gray=new Uint8Array(w*h).fill(40);
+ for(let y=10;y<50;y++)for(let x=10;x<70;x++){confidence[y*w+x]=250;gray[y*w+x]=80+x;}
+ const input={confidence,width:w,height:h,source:'edge-refined'},ordinary=foregroundFocusPoint(input,w,h);
+ assert.deepEqual(foregroundFocusPoint(input,w,h,{gray}),ordinary,'a smooth surface is not two focus objects');
+ gray.fill(100);gray[20*w+20]=250;
+ assert.deepEqual(foregroundFocusPoint(input,w,h,{gray}),ordinary,'a high-depth speck cannot steal focus');
+ const copy=gray.slice();
+ assert.deepEqual(foregroundFocusPoint(input,w,h,{gray:Uint8Array.from(gray,v=>Math.round(v*.5)+5)}),ordinary);
+ assert.deepEqual(gray,copy);
+ assert.throws(()=>foregroundFocusPoint(input,w,h,{gray:new Uint8Array(2)}),/geometry/);
+});
+
+test('geometry-aware focus separates three supported foreground depth layers without a tier-specific threshold',()=>{
+ const w=100,h=80,confidence=new Uint8Array(w*h),gray=new Uint8Array(w*h).fill(60);
+ for(let y=12;y<62;y++)for(let x=5;x<74;x++){
+  const p=y*w+x;confidence[p]=250;gray[p]=x<28?130:x<51?175:205;
+ }
+ const point=foregroundFocusPoint({confidence,width:w,height:h,source:'edge-refined'},w,h,{gray});
+ assert.ok(point.x>=.51,'the nearest supported layer must not be merged with the middle layer');
+ assert.equal(gray[Math.floor(point.y*h)*w+Math.floor(point.x*w)],205);
+});
+
 test('mattePromptPoints returns foreground positives and background negatives deterministically',()=>{
   const w=14,h=10,confidence=matte(w,h,(x,y)=>x>=3&&x<=8&&y>=2&&y<=7?245:5);
   const a=mattePromptPoints({confidence,width:w,height:h,source:'fused'},w,h,{positiveCount:4,negativeCount:4});

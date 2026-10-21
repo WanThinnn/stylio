@@ -25,12 +25,12 @@ function harness({apple=true,foreground,subject}={}){
     storedPointToDisplay:(x,y)=>({x,y}),depthInputBudgets:()=>[64],
     awaitAiSource:create=>create(),aiSourceCanvas:async()=>{const canvas={width,height};canvases.push(canvas);return canvas;},
     rgbSample:()=>new Uint8Array(width*height*3),readApplePortraitMatte:async()=>apple?matte:null,readAppleSkinMatte:async()=>null,
-    inferDepth:async(rgb,geometry,options)=>{calls.push({stage:'depth',modelId:options.modelId});return {gray:gray.slice()};},
+    inferDepth:async(rgb,geometry,options)=>{calls.push({stage:'depth',modelId:options.modelId,guidance:options.guidance});return {gray:gray.slice()};},
     inferForegroundMatte:async(...args)=>{calls.push({stage:'foreground',options:args[4]});return foreground?foreground(...args):{...matte,source:'isnet'};},
     refinePortraitSubject:async(...args)=>{calls.push({stage:'subject'});return subject?subject(...args):{matte:args[0],subjectReport:{applied:false}};},
   };
   const create=runInNewContext(source+'\ncreateAiPortrait;',context);
-  return {run:options=>create(new Uint8Array(),stage=>events.push(stage),null,options),calls,canvases,events,gray};
+  return {run:options=>create(new Uint8Array(),stage=>events.push(stage),null,options),calls,canvases,events,gray,matte};
 }
 
 async function watchdog(signal){
@@ -71,12 +71,31 @@ test('Standard and Pro use identical foreground stages and select only a differe
     const h=harness(),output=await h.run({modelId});outputs.push(output);
     assert.deepEqual(h.calls.map(c=>c.stage),['depth','foreground','subject']);
     assert.equal(h.calls[0].modelId,modelId);
+    assert.deepEqual(structuredClone(h.calls[0].guidance.orientation),{angle:0,mirror:null},'depth worker receives the canonical image orientation');
     assert.equal(h.calls[1].options.modelId,undefined,'foreground inference has no tier-specific policy');
   }
   assert.deepEqual(outputs[0].gray,outputs[1].gray);
   assert.deepEqual(structuredClone(outputs[0].foregroundReport),structuredClone(outputs[1].foregroundReport));
   assert.equal(outputs[0].sceneProfile.version,1);
   assert.deepEqual(structuredClone(outputs[0].sceneProfile),structuredClone(outputs[1].sceneProfile),'scene calibration cannot branch on model tier');
+});
+
+test('unanchored generated foreground preserves depth layers, while accepted Apple ownership keeps the prior fusion path',async()=>{
+ for(const apple of [false,true]){
+  const h=harness({apple});h.gray.fill(30);
+  for(let y=12;y<52;y++)for(let x=12;x<52;x++)h.gray[y*64+x]=x<38?60:190;
+  const raw=shapeAiDisparity(h.gray),out=await h.run({modelId:'standard'});
+  if(!apple){
+   assert.equal(out.subjectReport.mode,'scene-geometry');
+   assert.equal(Buffer.compare(out.gray,raw),0,'the orchestration must not collapse generated foreground onto one plane');
+   assert.ok(out.suggestedFocus.x>=38/64,'focus is selected from the substantial near layer');
+  }else{
+   const anchor=portraitFocusAnchor(h.matte,null,64,64),matte=fuseForegroundMattes(anchor,{...h.matte,source:'isnet'},64,64);
+   const expected=fusePortraitDepth(raw,matte,64,64).gray;
+   assert.equal(out.subjectReport.mode,'matte-conditioned-focus');
+   assert.equal(Buffer.compare(out.gray,expected),0,'Apple-anchored person/held-object fusion remains byte-identical');
+  }
+ }
 });
 
 test('without foreground guidance, optional failure returns generated depth without guessing a subject',async()=>{

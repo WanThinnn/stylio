@@ -79,6 +79,29 @@ test('AI Portrait geometry follows its stored source grid instead of the referen
   }
 });
 
+test('refocus and aperture edits cannot alter optical registration or source photographic resources',()=>{
+ const base=photo(900,600);
+ for(const source of [base,withCamera(base,'iPhone 16 Pro')]){
+  const original=discoverHeic(source),outputs=[
+   buildAiPortrait(source,depth,template,{focusX:.3,focusY:.7,aperture:1.4}).data,
+   buildAiPortrait(source,depth,template,{focusX:.7,focusY:.3,aperture:16}).data,
+  ];
+  const metadata=[];
+  for(const bytes of outputs){
+   const d=discoverHeic(bytes),id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
+   const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+   metadata.push(new TextDecoder().decode(extractItemData(bytes,d,side)));
+   for(const key of ['primary','hdrGrid','deltaGrid','stylesItem','linearThumb'])
+    assert.deepEqual(extractItemData(bytes,d,d[key]),extractItemData(source,original,original[key]),key+' is not a blur-setting resource');
+   for(const type of ['irot','imir'])assert.deepEqual(propertyBoxBytes(bytes,d.props,id,type),propertyBoxBytes(source,original.props,original.primary,type));
+   assert.deepEqual(extractItemData(bytes,d,id),depth.payload,'setting edits do not alter disparity samples');
+  }
+  assert.match(metadata[0],/SimulatedAperture>1\.400000</);assert.match(metadata[1],/SimulatedAperture>16\.000000</);
+  const withoutAperture=xmp=>xmp.replace(/(<depthBlurEffect:SimulatedAperture>)[^<]+/,'$1');
+  assert.equal(withoutAperture(metadata[0]),withoutAperture(metadata[1]),'intrinsics, range, lens transform and HDR calibration remain fixed');
+ }
+});
+
 test('Portrait HDR metadata update preserves all renderer fields outside the native capacity vector',()=>{
   const source=template.depthXmp,changed=matchPortraitHdrCapacity(source,3.472317);
   const render=xmp=>Buffer.from(/<depthBlurEffect:RenderingParameters>([^<]+)/.exec(xmp)[1],'base64');

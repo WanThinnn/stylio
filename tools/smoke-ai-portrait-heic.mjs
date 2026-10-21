@@ -5,6 +5,7 @@
  *   node tools/smoke-ai-portrait-heic.mjs <input.heic>
  *     --native=<matching-native.heic> --save=<output.heic>
  *     [--model=lite|standard|pro] [--provider=webgpu|wasm] [--aperture=1.4]
+ *     [--audit-stages=tests/private-fixtures/prefix] [--mobile-budget]
  */
 import {createServer} from 'node:http';
 import {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';
@@ -21,6 +22,8 @@ if(!inputArg)throw Error('Missing input HEIC');
 const input=resolve(inputArg),nativeArg=argv.find(x=>x.startsWith('--native='))?.slice(9),native=nativeArg?resolve(nativeArg):null;
 const saveArg=argv.find(x=>x.startsWith('--save='))?.slice(7),save=saveArg?resolve(saveArg):null;
 const debugArg=argv.find(x=>x.startsWith('--debug-depth='))?.slice(14),debugDepth=debugArg?resolve(debugArg):null;
+// Opt-in loopback instrumentation only; never changes the production module.
+const auditArg=argv.find(x=>x.startsWith('--audit-stages='))?.slice(15),auditStages=auditArg?resolve(auditArg):null;
 const model=argv.find(x=>x.startsWith('--model='))?.slice(8)||'standard';
 const provider=argv.find(x=>x.startsWith('--provider='))?.slice(11)||'webgpu';
 const aperture=Number(argv.find(x=>x.startsWith('--aperture='))?.slice(11)||'1.4');
@@ -28,9 +31,9 @@ const texture=argv.includes('--texture');
 if(!['lite','standard','pro'].includes(model)||!['webgpu','wasm'].includes(provider)||!Number.isFinite(aperture)||aperture<1||aperture>22)throw Error('Invalid arguments');
 if(!existsSync(input))throw Error('Input does not exist');
 if(native&&!existsSync(native))throw Error('Native reference does not exist');
-if(save||debugDepth){
+if(save||debugDepth||auditStages){
   const allowed=[dirname(input)+sep,resolve(root,'tests/private-fixtures')+sep];
-  for(const target of [save,debugDepth].filter(Boolean))if(!allowed.some(base=>target.startsWith(base)))throw Error('outputs must stay beside the input or under tests/private-fixtures');
+  for(const target of [save,debugDepth,auditStages].filter(Boolean))if(!allowed.some(base=>target.startsWith(base)))throw Error('outputs must stay beside the input or under tests/private-fixtures');
 }
 
 function nativeFocus(path){
@@ -72,10 +75,24 @@ const server=createServer(async(req,res)=>{
     const chunks=[];for await(const chunk of req)chunks.push(chunk);
     await writeFile(debugDepth,Buffer.concat(chunks));res.writeHead(200,{...headers,'Content-Type':'text/plain'});res.end('ok');return;
   }
+  if(['/__audit_raw__','/__audit_matte__','/__audit_semantic__','/__audit_rgb__','/__audit_final__'].includes(path)&&req.method==='POST'){
+    if(!auditStages){res.writeHead(403,headers);res.end();return;}
+    const chunks=[];let total=0;for await(const chunk of req){total+=chunk.length;if(total>4*1024*1024){res.writeHead(413,headers);res.end();return;}chunks.push(chunk);}
+    const suffix=path.slice(9,-2);await writeFile(auditStages+'-'+suffix+(suffix==='rgb'?'.rgb':'.gray'),Buffer.concat(chunks));res.end('ok');return;
+  }
   if(path==='/__smoke__'){res.writeHead(200,{...headers,'Content-Type':'text/html'});res.end('<title>HEIC AI Portrait Smoke</title>');return;}
   const full=resolve(root,'.'+path);
   if(!full.startsWith(root)){res.writeHead(404,headers);res.end();return;}
-  try{const body=await readFile(full);res.writeHead(200,{...headers,'Content-Type':mime[extname(full).toLowerCase()]||'application/octet-stream'});res.end(body);}
+  try{let body=await readFile(full);
+    if(auditStages&&path==='/web/src/portrait/ai-portrait.js'){
+      let code=body.toString('utf8');
+      const raw=/let gray=shapeAiDisparity\([^\r\n]+;/;
+      if(!raw.test(code))throw Error('Raw-depth audit seam changed');
+      code=code.replace(raw,line=>line+'\nglobalThis.__portraitAuditRaw=gray.slice();');
+      code=code.replace('const fused=fusePortraitDepth(', 'globalThis.__portraitAuditMatte=matte.confidence.slice();globalThis.__portraitAuditSemantic=matte.refinementConfidence?.slice();\nconst fused=fusePortraitDepth(');
+      body=Buffer.from(code);
+    }
+    res.writeHead(200,{...headers,'Content-Type':mime[extname(full).toLowerCase()]||'application/octet-stream'});res.end(body);}
   catch{res.writeHead(404,headers);res.end();}
 });
 await new Promise(ok=>server.listen(0,'127.0.0.1',ok));const port=server.address().port;
@@ -105,7 +122,8 @@ try{
     pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));
   });
   await cdp('Runtime.enable');await cdp('Page.enable');await sleep(600);
-  const cfg={base:'http://127.0.0.1:'+port,model,provider,aperture,texture,focus,save:Boolean(save),debugDepth:Boolean(debugDepth)};
+  if(argv.includes('--mobile-budget'))await cdp('Emulation.setUserAgentOverride',{userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 Version/27.0 Mobile/15E148 Safari/604.1'});
+  const cfg={base:'http://127.0.0.1:'+port,model,provider,aperture,texture,focus,save:Boolean(save),debugDepth:Boolean(debugDepth),audit:Boolean(auditStages)};
   const expression='(async cfg=>{'+
     "let data=new Uint8Array(await fetch(cfg.base+'/__input__').then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer()}));"+
     "const file=new File([data],'input.HEIC',{type:'image/heic'});"+
@@ -114,8 +132,9 @@ try{
       "import(cfg.base+'/web/src/portrait/ai-portrait.js'),import(cfg.base+'/web/src/portrait/ai-portrait-export.js')]);"+
     "const events=[],started=performance.now();"+
     "const result=await createAiPortrait(data,(stage,progress)=>{if(!events.length||events.at(-1)!==stage)events.push(stage);if(progress?.loaded)console.info(stage,progress.loaded,progress.total||0)},file,{provider:cfg.provider,modelId:cfg.model});"+
+    "if(cfg.audit){for(const [key,value]of Object.entries({raw:globalThis.__portraitAuditRaw,matte:globalThis.__portraitAuditMatte||new Uint8Array(),semantic:globalThis.__portraitAuditSemantic||new Uint8Array(),rgb:result.previewRgb,final:result.gray})){const r=await fetch(cfg.base+'/__audit_'+key+'__',{method:'POST',body:value});if(!r.ok)throw Error('audit '+r.status);}}"+
     "if(cfg.debugDepth){const c=document.createElement('canvas');c.width=result.width;c.height=result.height;const x=c.getContext('2d'),im=x.createImageData(result.width,result.height);for(let i=0;i<result.gray.length;i++){const v=result.gray[i],p=i*4;im.data[p]=im.data[p+1]=im.data[p+2]=v;im.data[p+3]=255}x.putImageData(im,0,0);const blob=await new Promise(ok=>c.toBlob(ok,'image/png'));const saved=await fetch(cfg.base+'/__debug_depth__',{method:'POST',body:blob});if(!saved.ok)throw Error('debug '+saved.status);c.width=c.height=0;}"+
-    "if(!cfg.save)return {ms:Math.round(performance.now()-started),subjectReport:result.subjectReport,foregroundReport:result.foregroundReport,suggestedFocus:result.suggestedFocus};"+
+    "if(!cfg.save)return {width:result.width,height:result.height,ms:Math.round(performance.now()-started),subjectReport:result.subjectReport,foregroundReport:result.foregroundReport,suggestedFocus:result.suggestedFocus,sceneProfile:result.sceneProfile};"+
     "const output=await exportAiPortrait(result,stage=>{if(stage&&!events.includes(stage))events.push(stage)});"+
     "const chosenFocus=cfg.focus.source==='native-xmp'?cfg.focus:(result.suggestedFocus||cfg.focus);"+
     "const updated=await output.withSettings({focusX:chosenFocus.x,focusY:chosenFocus.y,aperture:cfg.aperture});"+
@@ -126,6 +145,7 @@ try{
   const out=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},1200000);
   if(out.exceptionDetails)throw Error(JSON.stringify(out.exceptionDetails));
   if(!out.result?.value)throw Error('No smoke result');
+  if(auditStages)await writeFile(auditStages+'-report.json',JSON.stringify(out.result.value,null,2));
   console.log('PASS '+JSON.stringify(out.result.value,null,2));
   if(save)console.log('Saved '+save);
 }finally{

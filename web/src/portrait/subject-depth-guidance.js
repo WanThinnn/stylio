@@ -1,4 +1,5 @@
 import {MATTE_FOREGROUND,MATTE_BACKGROUND} from './foreground-matte.js';
+import {optimizeSceneDepth} from './scene-depth-optimizer.js';
 
 function validate(gray,matte,width,height){
   if(!(gray instanceof Uint8Array)||!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1
@@ -206,8 +207,16 @@ function focusConfidence(gray,matte,skin){
   return {confidence,excluded,skinDisagreement,disputedSkinPixels,skinDepthInterval:[low,high],boundaryDepthTolerance:Math.max(3,margin*2)};
 }
 
-export function fusePortraitDepth(gray,matte,width,height,{protectionMatte=null}={}){
+function preserveSceneDepth(gray,matte,width,height,rgb){
+  const semantic=matte.refinementConfidence;
+  if(rgb!==null&&(!(rgb instanceof Uint8Array)||rgb.length!==gray.length*3))throw Error('Invalid portrait RGB geometry');
+  if(semantic!==undefined&&(!(semantic instanceof Uint8Array)||semantic.length!==gray.length))throw Error('Invalid Portrait refinement confidence geometry');
+  return optimizeSceneDepth(gray,matte,width,height,rgb);
+}
+
+export function fusePortraitDepth(gray,matte,width,height,{protectionMatte=null,preserveGeometry=false,rgb=null}={}){
   validate(gray,matte,width,height);
+  if(preserveGeometry)return preserveSceneDepth(gray,matte,width,height,rgb);
   const protectionConfidence=validateProtection(protectionMatte,width,height,gray.length),
     focus=focusConfidence(gray,matte,protectionConfidence),confidence=focus.confidence,
     protection=foregroundProtectionBand(confidence,protectionConfidence,width,height),

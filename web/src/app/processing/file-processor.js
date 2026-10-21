@@ -74,6 +74,11 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
         } catch (error) {
           console.error("Raster conversion failed", file.name, error);
           ui.set(T(error.code==='err.hdrjpeg'?'err.hdrjpeg':/Raster image decode failed/i.test(error.message) ? "err.rasterdecode" : "err.rasterencode"), "err");
+          if(error.code==='err.hdrjpeg'){
+            const reason=String(error.message||error).replace(/\s+/g,' ').trim();
+            const detail=reason.length>300?reason.slice(0,90)+' … '+reason.slice(-200):reason;
+            ui.note?.(`HDR JPEG [${error.hdrStage||'metadata'}]: ${detail}`,'conversion');
+          }
           return;
         }
         overall(76);const outName = file.name.replace(/\.[^.]+$/, "") + "_PhotographicStyle.HEIC";

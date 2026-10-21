@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {rebaseRgbHdrPair,linearGrayColr} from '../../web/src/raster/hdr-scalar-pair.js';
-import {srgbToLinear} from '../../web/src/raster/jpeg-hdr.js';
+import {srgbToLinear,iccColr} from '../../web/src/raster/jpeg-hdr.js';
 import fs from 'node:fs';
 import {makeRgbHdrEditable,compactRgbHdrMdat} from '../../web/src/raster/hdr-scalar-export.js';
 import {buildGeneratedProfile} from '../../web/src/raster/generated-profile.js';
@@ -21,6 +21,16 @@ function unusedMdat(bytes,d=discoverHeic(bytes)){
  let used=0,end=-1;
  for(const [a,b]of ranges){used+=Math.max(0,b-Math.max(a,end));end=Math.max(end,b);}
  return [...boxes(bytes,0,bytes.length)].filter(b=>b.type==='mdat').reduce((n,b)=>n+b.size-b.hdr,0)-used;
+}
+
+// Description-only fixture for byte-preservation assertions, not a colour transform.
+function pqAlternateFixture(){
+ const text=s=>new TextEncoder().encode(s),name=text('Rec. ITU-R BT.2100 PQ\0');
+ const profile=new Uint8Array(160+name.length),v=new DataView(profile.buffer);
+ v.setUint32(0,profile.length);profile.set(text('acsp'),36);v.setUint32(128,1);
+ profile.set(text('desc'),132);v.setUint32(136,148);v.setUint32(140,12+name.length);
+ profile.set(text('desc'),148);v.setUint32(156,name.length);profile.set(name,160);
+ return iccColr(profile);
 }
 
 test('mdat packing preserves shared/overlapping/multiple extents and idat while removing only gaps',()=>{
@@ -119,17 +129,19 @@ test('production solver reproduces the device-accepted Color 9 base and gain sam
  assert.equal(Buffer.compare(output.gain,read('new-gain.gray')),0,'every full-resolution gray gain sample matches Color 9');
 });
 
-test('actual raster assembly -> scalar export -> Portrait/Texture shares a full-resolution HDR gain without losing controls',async()=>{
+for(const pqAlternate of [false,true]){
+test(`actual raster -> scalar -> Portrait/Texture preserves HDR gain, controls and alternate ICC (PQ=${pqAlternate})`,async()=>{
  const f=JSON.parse(fs.readFileSync(new URL('./raster-hevc.fixture.json',import.meta.url)));
  const assets=await generateSyntheticHevc(null,async(_,o)=>{const a=o.pixelFormat!=='gray'?f.assets.delta:o.width===768?f.assets.textureMask:f.assets.mask;
   return {...a,hvcc:Uint8Array.from(a.hvcc),payload:Uint8Array.from(a.payload)};});
  const profile=buildGeneratedProfile('48-12',assets),pd=discoverHeic(profile.meta),geometry={...targetGeometry({width:900,height:600}),exifOrientation:1};
  const codec=propertyBoxBytes(profile.meta,pd.props,pd.primaryTiles[0],'hvcC'),count=geometry.hdrColumns*geometry.hdrRows;
+ const alternateColr=pqAlternate?pqAlternateFixture():propertyBoxBytes(profile.meta,pd.props,pd.primary,'colr');
  const source=buildRasterHeic(profile,{main:Array.from({length:geometry.primaryTiles},()=>Uint8Array.of(1)),mainHvcc:codec,
   thumb:Uint8Array.of(2),thumbHvcc:codec,hdrChunks:Array.from({length:count},()=>Uint8Array.of(3)),hdrHvcc:codec,
   hdrXmp:new TextEncoder().encode('<original-gain/>'),hdrMetadata:{baseHeadroom:0,alternateHeadroom:2,useBaseColorSpace:true,
    channels:Array.from({length:3},()=>({min:0,max:2,gamma:1,baseOffset:0,alternateOffset:0}))},
-  hdrAlternateColr:propertyBoxBytes(profile.meta,pd.props,pd.primary,'colr'),
+  hdrAlternateColr:alternateColr,
   appleHdrChunks:Array.from({length:count},()=>Uint8Array.of(4)),appleHdrHvcc:codec,appleHdrHeadroom:4,texture:false},null,null,geometry);
  const saved=source.slice(),before=discoverHeic(source);let encoded=0,released=0;
  const media={
@@ -146,6 +158,7 @@ test('actual raster assembly -> scalar export -> Portrait/Texture shares a full-
  assert.ok(released>=3,'codec heap is released between decoding, paired encoding and thumbnails');
  assert.deepEqual(source,saved);assert.equal(d.primary,before.primary);assert.equal(d.stylesItem,before.stylesItem);
  const t=[...d.infos].find(([,i])=>i.type==='tmap')[0];
+ assert.deepEqual(propertyBoxBytes(out.data,d.props,t,'colr'),alternateColr,'scalar rebase retains the alternate HDR ICC');
  assert.deepEqual(d.refs.find(r=>r.type==='dimg'&&r.from===t).to,[d.primary,d.hdrGrid]);
  assert.deepEqual(dimensionsForItem(d.props,d.hdrGrid),dimensionsForItem(d.props,d.primary));
  assert.equal(d.hdrTiles.length,d.primaryTiles.length);assert.equal(parseTmapMetadata(extractItemData(out.data,d,t)).channels.length,1);
@@ -155,9 +168,13 @@ test('actual raster assembly -> scalar export -> Portrait/Texture shares a full-
  const template=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
  const portrait=buildAiPortrait(out.data,{payload:assets.mask.payload,hvcc:assets.mask.hvcc,width:64,height:64},template).data;
  for(const b of [out.data,portrait]){
+  const p=discoverHeic(b),pt=[...p.infos].find(([,i])=>i.type==='tmap')[0];
+  assert.deepEqual(propertyBoxBytes(b,p.props,pt,'colr'),alternateColr,'Portrait retains the alternate HDR ICC');
   const result=await executeJob({operation:hasTexture(discoverHeic(b).infos)?'repair-texture':'texture',data:b,opts:{preserveStyles:true}}),bytes=result.data||b,g=discoverHeic(bytes);
   const map=[...g.infos].find(([,i])=>i.type==='tmap')[0];assert.equal(g.refs.find(r=>r.type==='dimg'&&r.from===map).to[1],g.hdrGrid);
+  assert.deepEqual(propertyBoxBytes(bytes,g.props,map,'colr'),alternateColr,'Texture retains the alternate HDR ICC');
   assert.ok(g.stylesItem!==null&&g.linearThumb!==null&&g.deltaGrid!==null);
   g.hdrTiles.forEach((id,i)=>assert.deepEqual(extractItemData(bytes,g,id),extractItemData(out.data,d,d.hdrTiles[i])));
  }
 });
+}
