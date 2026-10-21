@@ -23,7 +23,10 @@ self.onmessage=async({data:{rgb,input,guidance,provider='webgpu'}})=>{
     if(!asset?.url||!Number.isInteger(asset.bytes)||!/^[a-f0-9]{64}$/.test(asset.sha256))throw Error('Invalid foreground model manifest');
     const url=new URL('isnet-general-use-fp16.onnx',ASSETS);url.searchParams.set('sha256',asset.sha256);
     stage='modelLoading';
-    const bytes=await downloadModelBytes(url.href,{onProgress:progress=>self.postMessage({stage:'download',progress})});
+    const bytes=await downloadModelBytes(url.href,{expectedBytes:asset.bytes,onProgress:progress=>{
+      stage=progress.source==='cache'?'modelCache':progress.source==='cacheWarning'?'modelCacheWarning':'modelDownload';
+      self.postMessage({stage,progress:{...progress,resource:'segmentation'}});
+    }});
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
     if(bytes.length!==asset.bytes||hash!==asset.sha256){
       try{await(await caches.open(MODEL_CACHE_NAME)).delete(url.href);}catch{}
@@ -31,8 +34,9 @@ self.onmessage=async({data:{rgb,input,guidance,provider='webgpu'}})=>{
     }
 
     const image=foregroundImageInput(rgb,width,height,orientation,size);
+    stage='modelLoading';self.postMessage({stage,progress:{resource:'segmentation'}});
     session=await ort.InferenceSession.create(bytes,{executionProviders:[provider]});
-    stage='inference';self.postMessage({stage:'subjectRefining'});
+    stage='inference';self.postMessage({stage,progress:{resource:'segmentation'}});
     tensor=new ort.Tensor('float32',image.data,[1,3,size,size]);
     outputs=await session.run({input_image:tensor});
     const output=outputs.output_image;if(!output)throw Error('Foreground model output missing');

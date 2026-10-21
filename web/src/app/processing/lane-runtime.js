@@ -9,10 +9,13 @@ import {releaseHevcEncoder as releaseRasterEncoder} from '../../raster/ffmpeg-he
 
 window.stylioProcessingLane={
   create(dependencies){
+    // Cleanup must target THIS realm's singleton runtimes; the acquisition
+    // function deliberately remains the parent's shared memory budget.
+    const local={...dependencies,releaseIdleModels:dependencies.releaseIdleModels?()=>window.stylioProcessingLane.releaseResources():null};
     const profiles=createProfileRepository();
-    const analysis=createPhotoAnalysis(dependencies);
-    const {tryAiPortrait}=createPortraitController({...dependencies,lane:1});
-    return createFileProcessor({...dependencies,...profiles,analysis,tryAiPortrait});
+    const analysis=createPhotoAnalysis(local);
+    const {tryAiPortrait}=createPortraitController({...local,lane:1});
+    return createFileProcessor({...local,...profiles,analysis,tryAiPortrait});
   },
   async releaseResources(){
     releaseDecodeCache();releaseHeicProcessor();releaseHevcEncoder();releaseRasterEncoder();

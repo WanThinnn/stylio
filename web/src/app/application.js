@@ -18,15 +18,23 @@ import {createProfileRepository} from './processing/profiles.js';
 import {createPhotoAnalysis} from './processing/photo-analysis.js';
 import {createPortraitController} from './processing/portrait-controller.js';
 import {createFileProcessor} from './processing/file-processor.js';
-import {createTaskQueue} from './processing/task-queue.js';
+import {createTaskQueue,createProcessingBudget} from './processing/task-queue.js';
 import {createIsolatedProcessor} from './processing/isolated-processor.js';
-import {getProcessingPreferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported} from '../ui/processing-preferences.js';
+import {getProcessingPreferences,PROCESSING_STORAGE_KEYS,memoryConstrainedProcessing} from '../ui/processing-preferences.js';
 import {createScreenAwake} from '../ui/screen-awake.js';
 
 // App wiring and session lifecycle; domain workflows live in their modules.
 export function startApplication(){
   const shell=getAppShell();
   const preferences=getProcessingPreferences();
+  const constrained=memoryConstrainedProcessing(navigator);
+  const acquireProcessingSlot=createProcessingBudget({concurrency:constrained?1:2});
+  async function releaseIdleModels(){
+    const [{releaseOrtModels},{releaseDetailWorkers},{releaseStyleRecommender}]=await Promise.all([
+      import('../vision/ort-vision.js'),import('../detail/detail-inference.js'),import('../recommend/style-runtime.js'),
+    ]);
+    releaseDetailWorkers();releaseStyleRecommender();await releaseOrtModels();
+  }
   let parallelProcessor=null,screenAwake;
   const $ = (id) => document.getElementById(id);
   const fileInput = $("file"), drop = $("drop"), list = $("list");
@@ -207,7 +215,7 @@ export function startApplication(){
   // Fetch the decoder while the visitor is still choosing a photo,
   // so the first photo does not wait for the download, and someone just reading the page
   // downloads nothing. A failure here is harmless: ensureDecode() tries again and falls back.
-  const warmDecoder = () => { loadLibheif().catch(() => {}); };
+  const warmDecoder = () => { if(!constrained)loadLibheif().catch(() => {}); };
   for (const ev of ["pointerdown", "dragenter", "focus"]) drop.addEventListener(ev, warmDecoder, { once: true });
 
   let lang = pickLanguage();
@@ -243,11 +251,11 @@ export function startApplication(){
     if(shell.batch)shell.batch(restore);else restore();
     refreshHistoryButton();
   }
-  const {tryAiPortrait,runAiCandidate}=createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcceleration,selectedAiLevel});
-  const processingDependencies={row,T,getLanguage:()=>lang,aiText,aiFeatures,aiCandidates,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis};
+  const {tryAiPortrait,runAiCandidate}=createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcceleration,selectedAiLevel,acquireProcessingSlot});
+  const processingDependencies={row,T,getLanguage:()=>lang,aiText,aiFeatures,aiCandidates,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis,acquireProcessingSlot,releaseIdleModels:constrained?releaseIdleModels:null};
   const processor=createFileProcessor(processingDependencies);
   const queue=createTaskQueue({
-    concurrency:()=>preferences.get('parallel')&&parallelProcessingSupported(navigator)?2:1,
+    concurrency:()=>preferences.get('parallel')?2:1,
     onChange:state=>{pendingTasks=state.pending;refreshHistoryButton();screenAwake?.setBusy(state.active>0);},
     async run(job,lane){
       if(job.task)return job.task();

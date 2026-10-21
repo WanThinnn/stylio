@@ -20,7 +20,7 @@ async function ensureRuntime({modelId,provider,assetRoot,wasmThreads=1}){
   if(manifest.schema!==1||entry.family!==model.assetFamily)
     throw Error('AI detail model selection does not match pinned weights');
   const url=new URL(entry.file,root);url.searchParams.set('sha256',entry.sha256);
-  const bytes=await downloadModelBytes(url.href,{onProgress:progress=>self.postMessage({
+  const bytes=await downloadModelBytes(url.href,{expectedBytes:entry.bytes,onProgress:progress=>self.postMessage({
     stage:progress.source==='cache'?'modelCache':progress.source==='cacheWarning'?'modelCacheWarning':'modelDownload',progress,
   })});
   if(bytes.length!==entry.bytes)throw Error('AI detail model size mismatch');

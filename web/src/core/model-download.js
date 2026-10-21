@@ -41,8 +41,9 @@ export function downloadModelBytes(url, options = {}) {
 }
 
 async function downloadModelBytesOnce(url, {
-  onProgress = () => {}, stallTimeoutMs = 30000, cacheStorage = globalThis.caches,
+  onProgress = () => {}, stallTimeoutMs = 30000, cacheStorage = globalThis.caches, expectedBytes = null,
 } = {}) {
+  if(expectedBytes!==null&&(!Number.isSafeInteger(expectedBytes)||expectedBytes<=0))throw Error('Invalid model size');
   let cache = null;
   const cacheWarning = () => onProgress({source: "cacheWarning", loaded: 0, total: null, complete: false});
   try {
@@ -53,7 +54,7 @@ async function downloadModelBytesOnce(url, {
         const total = Number(saved.headers.get("content-length"));
         await onProgress({source: "cache", loaded: 0, total, complete: false});
         const bytes = new Uint8Array(await withModelTimeout(saved.arrayBuffer(), stallTimeoutMs));
-        if (bytes.byteLength > 0 && bytes.byteLength === total) {
+        if (bytes.byteLength > 0 && bytes.byteLength === total && (expectedBytes===null||bytes.byteLength===expectedBytes)) {
           await onProgress({source: "cache", loaded: bytes.byteLength, total, complete: true});
           return bytes;
         }
@@ -78,14 +79,23 @@ async function downloadModelBytesOnce(url, {
     // Content-Length describes compressed bytes, whereas a reader returns decoded bytes.
     const encoding = response.headers.get("content-encoding");
     if (Number.isSafeInteger(length) && length > 0 && (!encoding || encoding === "identity")) total = length;
+    // The manifest describes decoded model bytes even if HTTP is compressed.
+    if(expectedBytes!==null)total=expectedBytes;
     await notify();
     if (!response.body) throw new Error("Download stream unavailable");
     reader = response.body.getReader();
     const chunks = [];
+    // A known-size model needs one destination plus the current transport chunk,
+    // not an entire chunk list AND a second model-sized concatenation buffer.
+    let bytes=total===null?null:new Uint8Array(total);
     for (;;) {
       const {done, value} = await withModelTimeout(reader.read(), stallTimeoutMs);
       if (done) break;
-      chunks.push(value);
+      if(bytes&&loaded+value.byteLength>bytes.length){
+        if(expectedBytes!==null)throw Error('Model download exceeds expected size');
+        chunks.push(bytes.subarray(0,loaded));bytes=null;
+      }
+      if(bytes)bytes.set(value,loaded);else chunks.push(value);
       loaded += value.byteLength;
       // Avoid announcing 100% before the stream is complete or when a server's length is wrong.
       if (total !== null && loaded > total) total = null;
@@ -95,9 +105,13 @@ async function downloadModelBytesOnce(url, {
     }
     if (!loaded) throw new Error("Empty model download");
     if (total !== null && loaded !== total) throw new Error("Incomplete model download");
-    const bytes = new Uint8Array(loaded);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    if(!bytes){
+      bytes=new Uint8Array(loaded);let offset=0;
+      for(let i=0;i<chunks.length;i++){
+        bytes.set(chunks[i],offset);offset+=chunks[i].byteLength;chunks[i]=null;
+      }
+      chunks.length=0;
+    }
     if (cache) {
       try {
         // Store only a complete, validated download, with its decoded byte length.

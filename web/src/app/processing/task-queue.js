@@ -1,5 +1,32 @@
 import {waitForVisiblePage} from '../../ui/processing-scheduler.js';
 
+// Share this function with the iframe lane, not a second instance of the
+// budget. Waiting jobs hold no codec heaps, model bytes or GPU sessions.
+export function createProcessingBudget({concurrency=1}={}){
+  let active=0;
+  const waiting=[];
+  function pump(){
+    while(active<concurrency&&waiting.length){
+      const job=waiting.shift();job.signal?.removeEventListener('abort',job.abort);
+      active++;let released=false;
+      job.resolve(()=>{if(released)return;released=true;active--;pump();});
+    }
+  }
+  return function acquire({signal,onWait}={}){
+    if(signal?.aborted)return Promise.reject(signal.reason||new DOMException('Cancelled','AbortError'));
+    return new Promise((resolve,reject)=>{
+      const job={resolve,reject,signal,abort(){
+        const index=waiting.indexOf(job);if(index<0)return;
+        waiting.splice(index,1);signal.removeEventListener('abort',job.abort);
+        reject(signal.reason||new DOMException('Cancelled','AbortError'));
+      }};
+      waiting.push(job);signal?.addEventListener('abort',job.abort,{once:true});
+      if(active>=concurrency)onWait?.();
+      pump();
+    });
+  };
+}
+
 // One FIFO shared by picker, drop and optional reprocessing. A lane never runs
 // two jobs at once; changing the limit affects the next start, not an active job.
 export function createTaskQueue({run,concurrency=()=>1,onChange=()=>{},waitUntilVisible=waitForVisiblePage}={}){

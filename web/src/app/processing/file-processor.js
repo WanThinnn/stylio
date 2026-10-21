@@ -13,14 +13,25 @@ import {releaseHevcEncoder as releaseRasterEncoder} from '../../raster/ffmpeg-he
 import {readImageFile,addTextureInWorker,repairTextureInWorker,restoreNativePortraitInWorker,legacyCompatibilityInWorker,patchInWorker,releaseHeicProcessor} from '../../media/heic-processing.js';
 import {waitForVisiblePage} from '../../ui/processing-scheduler.js';
 import {shouldRenderStyleDisplay} from '../../recommend/style-display-render.js';
-export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis}){
+export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis,acquireProcessingSlot,releaseIdleModels}){
     const {addMissingSoftSkin,ensureDecode,stagePercent,modelDownloadStatus,styleProgress,styleResultNote,adaptiveStyleCompletionNotice,recommendHeicStyle}=analysis;
   async function handleFile(file,preparedUi=null) {
     const ui = preparedUi||row(file.name,file);
     const inputSize = file.size;
-    const overall=value=>ui.progress?.(value);
+    const portraitRequested=aiFeatures.enabled('portrait');
+    let lastProgress=0,releaseSlot;
+    const overall=value=>{lastProgress=Math.max(lastProgress,value<100&&portraitRequested?value*35/90:value);ui.progress?.(lastProgress);};
+    const releaseConversion=async()=>{
+      // Release this realm's operation resources before another lane starts.
+      if(acquireProcessingSlot&&!releaseSlot)return;
+      try{
+        releaseDecodeCache();releaseHevcEncoder();releaseRasterEncoder();releaseHeicProcessor();
+        if(releaseIdleModels)await releaseIdleModels();
+      }finally{releaseSlot?.();releaseSlot=null;}
+    };
     const mapped=(start,end,done,total)=>Number.isFinite(done)&&Number.isFinite(total)&&total>0?start+(end-start)*Math.max(0,Math.min(1,done/total)):start;
     try {
+      releaseSlot=await acquireProcessingSlot?.({onWait:()=>ui.set(aiText().waitingResources)});
       overall(3);ui.set(T("st.reading"));
       const input = await readImageFile(file);overall(8);
       let bytes = input.bytes;
@@ -93,7 +104,7 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
         ui.note(result.hdr?T('raster.hdr'):result.geometry.resized ? T("raster.resized") : T("raster.note"), "conversion");
         showCaptureDate(ui, date);
         await ui.metadata(result.data, inputSize, {raster: !result.hdr, raw: input.format === 'dng'});overall(88);
-        overall(90);await tryAiPortrait(null,output,ui,file.name,file);
+        overall(90);await releaseConversion();await tryAiPortrait(null,output,ui,file.name,file);
         adaptiveStyleCompletionNotice(ui,result.styleRecommendation);
         return;
       }
@@ -436,7 +447,7 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
       // Keep the first compatibility copy frozen at the verified target
       // boundary. Optional AI Portrait may be applied on a later normal pass.
       if(unknownAppleContract){ui.output(shareFile);overall(100);ui.aiBusy(false);}
-      if(!unknownAppleContract)await tryAiPortrait(bytes,shareFile,ui,file.name,file,preserveIncomplete);
+      if(!unknownAppleContract){await releaseConversion();await tryAiPortrait(bytes,shareFile,ui,file.name,file,preserveIncomplete);}
       adaptiveStyleCompletionNotice(ui,adaptiveStyleRecommendation);
       if(preserveIncomplete)ui.portraitAdvice(T('warn.nativeeditmissing'));
       else if(!compatibilityRecovered&&portraitState&&portraitState!=='existing-renderer'&&!restorePortrait)
@@ -451,7 +462,7 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
     } finally {
       // Samples belong to this runtime lane's operation, not its history
       // row. Release them after export while retaining only the downloadable file.
-      releaseDecodeCache();releaseHevcEncoder();releaseRasterEncoder();releaseHeicProcessor();
+      await releaseConversion();
     }
   }
 

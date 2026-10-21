@@ -70,7 +70,7 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
     let generatedMatte=null,matte=null,subjectReport={applied:false,reason:'no-foreground-guidance'},foregroundReport={},suggestedFocus;
     if(modelId!=='lite'){
       try{
-        onProgress('subjectRefining');
+        onProgress('subjectRefining',{resource:'segmentation'});
         // Standard and Pro share the accepted foreground/edge pipeline.
         // Their tier selects only the depth model above.
         generatedMatte=await inferForegroundMatte(previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
@@ -91,7 +91,7 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         anchor:focusAnchor?.report??null,anchorSource:focusAnchor?.source??null,
         generated:generatedMatte?.report??null,generatedSelection:generatedSelection?.report??null,fused:matte.report??null};
       try{
-        onProgress('subjectRefining');
+        onProgress('subjectRefining',{resource:'segmentationRefinement'});
         const subject=await refinePortraitSubject(matte,previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
         if(subject?.matte?.confidence?.length===gray.length){matte=subject.matte;foregroundReport.edge=subject.subjectReport;}
       }catch(error){
@@ -106,6 +106,7 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
       // Keep scene geometry unless an accepted Apple PEM/skin ownership anchor
       // supports the existing device-tested person/held-object focus fusion.
       const preserveGeometry=!focusAnchor;
+      onProgress('refining',{resource:'geometry'});
       const fused=fusePortraitDepth(gray,matte,width,height,{protectionMatte,preserveGeometry,rgb:previewRgb});gray=fused.gray;
       foregroundReport.depth={...fused.report,protectionSource:protectionMatte?.source??null};
       subjectReport={...fused.report,foreground:true,edge:foregroundReport.edge??null};

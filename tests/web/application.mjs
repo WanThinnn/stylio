@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {createAiFeatureControls} from '../../web/src/ui/ai-feature-controls.js';
-import {createTaskQueue} from '../../web/src/app/processing/task-queue.js';
-import {createProcessingPreferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported} from '../../web/src/ui/processing-preferences.js';
+import {createTaskQueue,createProcessingBudget} from '../../web/src/app/processing/task-queue.js';
+import {createProcessingPreferences,PROCESSING_STORAGE_KEYS,memoryConstrainedProcessing} from '../../web/src/ui/processing-preferences.js';
 import {createScreenAwake} from '../../web/src/ui/screen-awake.js';
 
 // Exercise application wiring without downloading models, spawning workers or
@@ -56,7 +56,7 @@ function harness({manualQueue=false,historyEntries=[],stallPreload=false,stallHi
     loadLibheif:async()=>{},releaseDecodeCache(){},releaseHevcEncoder(){},releaseRasterEncoder(){},releaseHeicProcessor(){},
     clearDownloadedAssets:async()=>{},waitForVisiblePage:async()=>{},
     createPhotoAnalysis:deps=>{captured.analysis=deps;return {kind:'analysis'};},
-    getProcessingPreferences:()=>preferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported,createTaskQueue,createScreenAwake,
+    getProcessingPreferences:()=>preferences,PROCESSING_STORAGE_KEYS,memoryConstrainedProcessing,createTaskQueue,createProcessingBudget,createScreenAwake,
     createIsolatedProcessor:()=>({handleFile:(file,ui)=>handleFile(file,ui,1),releaseResources:async()=>{},dispose(){}}),
     createLivePhotoSession:deps=>{captured.live=deps;return {liveMovies:new Map(),livePhotos:[],attachMovie(){},handleMovie(){}};},
     createProfileRepository:()=>({preload:async()=>{calls.push(['profiles']);if(stallPreload)await new Promise(()=>{});},ensureProfileIndex(){},getProfile(){}}),
@@ -191,16 +191,21 @@ test('parallel preference starts two isolated lanes and changing it does not int
   assert.equal(h.node('clear-assets').disabled,false);
 });
 
-test('iOS and Safari never start a second photo runtime even with parallel saved on',async()=>{
+test('iOS and Safari admit two lanes but both use the same single-slot memory budget',async()=>{
   for(const nav of [{userAgent:'iPhone Version/27 Safari/605.1'},
     {userAgent:'Macintosh Version/27 Safari/605.1'},
     {userAgent:'Macintosh',platform:'MacIntel',maxTouchPoints:5}]){
     const h=harness({manualQueue:true,nav});await h.start();h.preferences.set('parallel',true);
     h.node('file').files=['first','second'];await h.node('file').fire('change');
-    await h.waitForStart('first');await new Promise(resolve=>setImmediate(resolve));
-    try{assert.deepEqual(h.calls.filter(([type])=>type==='start'),[['start','first',0]],'one runtime owns the mobile codec/model budget');}
-    finally{h.release('first');h.release('second');}
-    await h.waitForStart('second');h.release('second');
+    await Promise.all([h.waitForStart('first'),h.waitForStart('second')]);
+    assert.deepEqual(h.calls.filter(([type])=>type==='start'),[['start','first',0],['start','second',1]]);
+    assert.equal(h.captured.processing.acquireProcessingSlot,h.captured.portrait.acquireProcessingSlot);
+    const acquire=h.captured.processing.acquireProcessingSlot;
+    const release=await acquire();let secondGranted=false;
+    const pending=acquire().then(release=>{secondGranted=true;release();});
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(secondGranted,false);
+    release();await pending;assert.equal(secondGranted,true);
+    h.release('first');h.release('second');
   }
 });
 

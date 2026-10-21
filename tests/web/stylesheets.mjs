@@ -5,6 +5,17 @@ const entry=new URL('../../web/styles.css',import.meta.url);
 const css=readFileSync(entry,'utf8');
 const paths=[...css.matchAll(/@import url\("([^"]+)"\);/g)].map(match=>match[1]);
 const worker=readFileSync(new URL('../../web/sw.js',import.meta.url),'utf8');
+
+test('task cards retain the original naturally wrapping text and centered spacing',()=>{
+  const results=readFileSync(new URL('../../web/styles/components/results.css',import.meta.url),'utf8');
+  const card=results.match(/\.task-card \{([^}]+)\}/)[1];
+  const status=results.match(/\.task-copy>span \{([^}]+)\}/)[1];
+  const name=results.match(/\.task-copy strong \{([^}]+)\}/)[1];
+  assert.match(card,/padding: 18px 16px/);assert.match(card,/min-height: 88px/);assert.match(card,/align-items: center/);
+  assert.match(status,/line-height: 1\.4/);assert.match(status,/overflow-wrap: anywhere/);
+  assert.doesNotMatch(status,/line-clamp|block-size|(?:^|\n)\s*(?:min-|max-)?height:|overflow: hidden/);
+  assert.match(name,/overflow-wrap: anywhere/);assert.doesNotMatch(name,/white-space: nowrap|text-overflow: ellipsis/);
+});
 test('flat CSS entry is small, ordered, locally resolvable and available on cold offline boot',()=>{
   assert.equal(paths.length,11);assert.ok(css.split('\n').length<15);
   assert.match(paths[0],/foundations\/tokens/);assert.match(paths[1],/foundations\/base/);

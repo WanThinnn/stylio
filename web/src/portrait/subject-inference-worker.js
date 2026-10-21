@@ -19,18 +19,21 @@ self.onmessage=async({data:{rgb,input,guidance,provider='webgpu'}})=>{
     const load=async name=>{
       const asset=manifest.files[name];if(!asset)throw Error('Subject model assets unavailable');
       const url=new URL(name,ASSETS);url.searchParams.set('sha256',asset.sha256);
-      stage='modelLoading';const bytes=await downloadModelBytes(url.href,{onProgress:progress=>self.postMessage({stage:'download',progress})});
+      stage='modelLoading';const bytes=await downloadModelBytes(url.href,{expectedBytes:asset.bytes,onProgress:progress=>{
+        stage=progress.source==='cache'?'modelCache':progress.source==='cacheWarning'?'modelCacheWarning':'modelDownload';
+        self.postMessage({stage,progress:{...progress,resource:'segmentationRefinement'}});
+      }});
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
       if(bytes.length!==asset.bytes||hash!==asset.sha256){
         try{await(await caches.open(MODEL_CACHE_NAME)).delete(url.href);}catch{}
         throw Error('Subject model integrity check failed');
       }
-      return bytes;
+      stage='modelLoading';self.postMessage({stage,progress:{resource:'segmentationRefinement'}});return bytes;
     };
 
     const image=subjectImageInput(rgb,width,height,orientation);
     session=await ort.InferenceSession.create(await load('subject-encoder.onnx'),{executionProviders:[provider]});
-    stage='inference';self.postMessage({stage:'subjectRefining'});
+    stage='inference';self.postMessage({stage,progress:{resource:'segmentationRefinement'}});
     tensor=new ort.Tensor('float32',image.data,[1,3,1024,1024]);
     outputs=await session.run({image:tensor});tensor.dispose();tensor=null;
     const embedding=new Float32Array(await outputs.image_embeddings.getData());
@@ -45,7 +48,7 @@ self.onmessage=async({data:{rgb,input,guidance,provider='webgpu'}})=>{
     }
 
     session=await ort.InferenceSession.create(await load('subject-decoder.onnx'),{executionProviders:[provider]});
-    stage='inference';self.postMessage({stage:'subjectRefining'});
+    stage='inference';self.postMessage({stage,progress:{resource:'segmentationRefinement'}});
     embeddingTensor=new ort.Tensor('float32',embedding,[1,256,64,64]);
     const coords=new Float32Array(prompts.length*2),labels=new Float32Array(prompts.length);
     prompts.forEach((point,i)=>{coords[i*2]=point.x*image.width;coords[i*2+1]=point.y*image.height;labels[i]=point.label;});

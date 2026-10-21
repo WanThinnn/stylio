@@ -21,22 +21,22 @@ self.onmessage = async ({data: {rgb, input, guidance,provider='webgpu',modelId='
     for(const name of selected.files){
       const asset=manifest.files[name];if(!asset)throw Error('AI assets unavailable');
       const url=new URL(name,ASSETS);url.searchParams.set('sha256',asset.sha256);
-      const bytes=await downloadModelBytes(url.href,{onProgress:progress=>{
+      const bytes=await downloadModelBytes(url.href,{expectedBytes:asset.bytes,onProgress:progress=>{
         stage=progress.source==='cache'?'modelCache':progress.source==='cacheWarning'?'modelCacheWarning':'modelDownload';
-        self.postMessage({stage,progress});
+        self.postMessage({stage,progress:{...progress,resource:'depth'}});
       }});
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');
       if(bytes.length!==asset.bytes||hash!==asset.sha256){try{await(await caches.open(MODEL_CACHE_NAME)).delete(url.href);}catch{}throw Error('AI model integrity check failed');}
       files.push(bytes);
     }
-    stage='modelLoading';self.postMessage({stage});
+    stage='modelLoading';self.postMessage({stage,progress:{resource:'depth'}});
     session = await ort.InferenceSession.create(files[0], {executionProviders:[provider],
       ...(selected.rank===5?{externalData:[{path:'model.onnx_data',data:files[1]}]}:{})});files.length=0;
     const image=depthImageInput(rgb,input.width,input.height,guidance?.orientation);
     const count = image.width * image.height, tensor = new Float32Array(3 * count);
     const mean = [.485,.456,.406], std = [.229,.224,.225];
     for(let p=0;p<count;p++)for(let c=0;c<3;c++)tensor[c*count+p]=(image.rgb[p*3+c]/255-mean[c])/std[c];
-    stage='inference';self.postMessage({stage});
+    stage='inference';self.postMessage({stage,progress:{resource:'depth'}});
     inputTensor=new ort.Tensor('float32',tensor,selected.rank===5?[1,1,3,image.height,image.width]:[1,3,image.height,image.width]);
     outputs = await session.run({[session.inputNames[0]]:inputTensor},['predicted_depth']);
     inputTensor.dispose();inputTensor=null;
@@ -45,7 +45,7 @@ self.onmessage = async ({data: {rgb, input, guidance,provider='webgpu',modelId='
       output.dims.at(-1),output.dims.at(-2),guidance?.orientation);
     for(const value of Object.values(outputs))value.dispose();outputs=null;await session.release();session=null;
     if(guidance){
-      stage='refining';self.postMessage({stage});
+      stage='refining';self.postMessage({stage,progress:{resource:'depth'}});
       let gray=refineDepth(values,mw,mh,guidance.rgb,guidance.width,guidance.height);
       if(guidance.person)gray=protectPersonDepth(gray,guidance.person,guidance.width,guidance.height);
       self.postMessage({result:{gray,mh,mw}},[gray.buffer]);

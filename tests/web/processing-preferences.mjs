@@ -1,9 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createProcessingPreferences} from '../../web/src/ui/processing-preferences.js';
+import {createProcessingPreferences,bindProcessingPreferences,memoryConstrainedProcessing} from '../../web/src/ui/processing-preferences.js';
 import {createScreenAwake} from '../../web/src/ui/screen-awake.js';
 import {createTaskQueue} from '../../web/src/app/processing/task-queue.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('iPhone, desktop-mode iPad and Safari expose parallel with a managed-memory explanation',()=>{
+ for(const nav of [{userAgent:'iPhone Safari/605'},
+  {userAgent:'Macintosh',platform:'MacIntel',maxTouchPoints:5},
+  {userAgent:'Macintosh Version/18 Safari/605'},
+  {userAgent:'iPhone CriOS/131 Mobile Safari/605'}]){
+  assert.equal(memoryConstrainedProcessing(nav),true);
+  const preferences=createProcessingPreferences({getItem:()=>null}),listeners={};
+  const control={checked:false,disabled:false,addEventListener:(event,fn)=>listeners[event]=fn},hint={dataset:{}};
+  bindProcessingPreferences({preferences,nav,doc:{getElementById:id=>id==='parallel-processing'?control:id==='parallel-hint'?hint:null}});
+  assert.equal(control.disabled,false);assert.equal(hint.dataset.i18n,'settings.parallelmanaged');
+  control.checked=true;listeners.change();assert.equal(preferences.get('parallel'),true);
+ }
+ assert.equal(memoryConstrainedProcessing({userAgent:'Windows Chrome/130 Safari/537'}),false);
+});
 
 test('processing preferences persist real settings and support blocked storage',()=>{
   const saved=new Map(),storage={getItem:k=>saved.get(k),setItem:(k,v)=>saved.set(k,v),removeItem:k=>saved.delete(k)};

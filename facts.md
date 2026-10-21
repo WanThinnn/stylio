@@ -7410,3 +7410,91 @@ PWA/diff checks pass. v252 private original-source Standard/Pro files are shared
 on LAN port8789 until01:56:21 local on2026-10-22; downloads byte-verified. No
 commit/push. Physical iPhone Photos wide-aperture, f16/Off, icon/edit/HDR checks
 remain required. See docs/web/2026-10-21-adaptive-depth-support.md.
+
+### 10.185 Mobile parallel memory budget and AI progress (local v253/v254, 2026-10-22)
+
+Accepted v252 depth/HDR/orientation work committed as 5c608eb before this change;
+no push. User requested working iOS parallel, generic role-based model names,
+task-specific inference copy, and progress that does not begin the slow AI step
+at 90%. They also reported crashes while two photos wait for/download models.
+
+Fixed reproducible cache-as-download messages in the foreground and subject
+workers. Added resource identity and initialization/inference stage reporting.
+Portrait now begins at35%, uses monotonic work-weighted phases, and describes
+depth estimation, segmentation, edge refinement and geometry work. No fake
+timer-based inference percent. Generic model names replace backend/model brands.
+
+iOS/Safari parallel is available again with two independent jobs and one shared
+FIFO memory-intensive slot across the parent/iframe realms. Conversion releases
+its operation resources before Portrait acquisition, so jobs advance between
+phases without overlapping heavyweight AI/codec work. Acquisition precedes
+source/model buffers and includes model download/cache reads. Wait cancellation
+does not allocate; lane-local cleanup never frees the other realm's models.
+Manifest-sized streaming downloads avoid retaining a whole chunk list plus a
+second concatenated model buffer. Native/other image mutation logic and v252
+depth/optics algorithms are unchanged.
+
+Regressions:579 tests,562 pass,17 missing-private-fixture skips,0 fail; PWA/diff
+checks pass. Existing UI smoke:59 checks pass. Real two-HEIC Standard Portrait
+app smoke in Chromium+iPhone UA makes two Portrait files, one iframe, six AI
+workers with peak1, and one network fetch per Portrait asset (second job cache).
+This is not physical Safari validation or proof against iOS process termination.
+
+User approved temporary HTTPS preview; only public web/ assets are exposed,
+no uploads/photos/private fixtures. Current server expires02:37 local2026-10-22.
+New origin means one legitimate initial model download. Shell v254 adds resolved
+role labels to failure diagnostics without changing model cache identities.
+These changes remain local,
+uncommitted/unpushed pending device verification. Details/repro commands:
+docs/web/2026-10-22-parallel-memory-and-progress.md.
+
+### 10.186 Stable two-line task status cards (local v255, 2026-10-22)
+
+User reported the v254 device test stable, then requested a UI-only correction:
+long processing text expanded the history/progress card and short text shrank
+it repeatedly. Browser reproduction measured 88->100.875->88px at390px width;
+at320px a long download status reached119.0625px. Long filenames also wrapped.
+The width itself stayed fixed. User explicitly chose two reserved status lines,
+kept compact rather than a taller card.
+
+Only results.css changes layout: font-relative two-line status height/clamp,
+single-line filename ellipsis, stable chevron, and12px vertical padding keep the
+default card at88px. Full status text remains in the DOM/detail view. No image
+pipeline, processing algorithm, model or cache-download identity change. Shell
+revision255 refreshes the existing HTTPS preview without clearing model caches.
+
+New real-shell browser regression first failed on the expanding card, then
+passed20 combinations of320/390/430/768/1280px,100%/200% text,light/dark. It checks
+short/long/empty/multilingual/unbroken statuses, the following card position,
+filename truncation and full diagnostic text retention. Screenshots/reports are
+private under tests/private-fixtures/task-card-v255. A CSS CI regression guards
+the two-line font-relative contract. No commit/push for these follow-up changes.
+
+### 10.187 User reverted reserved-line task cards (local v256, 2026-10-22)
+
+User rejected the v255 reserved two-line layout after seeing short text appear
+off-center beside its ring. Explicitly requested the old layout: short statuses
+use one natural line; longer text wraps normally. Restored results.css exactly
+to its pre-v255 content, including18px vertical padding,1.4 status line-height,
+natural filename wrapping and original chevron rules. No fixed two-line height
+or clamping remains. Do not reintroduce reserved empty status lines.
+
+Updated CSS/browser regression expectations to guard natural text flow and
+centering. The real-shell smoke passes20 viewport/font/theme combinations;
+short cards remain88px, long text is not clipped and the following card moves
+normally with content. Shell v256 refreshes the same approved HTTPS preview.
+Parallel, download cache, progress and all image pipeline changes are retained.
+No commit/push.
+
+### 10.188 Final pre-push review of mobile parallel/progress (2026-10-22)
+
+User approved the restored v256 UI and requested one final review, then commit
+and push if clean. Current-change review found no blocking issue in resource
+ownership/cancellation, cache/download progress, generic model copy or the
+accepted native/non-native boundaries. Repeated580 regressions:563 pass,
+17 private-fixture skips,0 fail. Existing mobile-shell59 and natural-card20
+browser checks pass. Real two-HEIC Standard Portrait smoke passes again with
+two outputs,peak1 AI worker/model transfer and one fetch per Portrait weight.
+Release1.1.0 synchronization,PWA and diff checks pass. Card CSS matches its
+original pre-v255 content. No private photos,generated screenshots/reports or
+assembled local weights are staged. Approved destination:origin/master.

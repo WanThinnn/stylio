@@ -1,9 +1,9 @@
 const KEYS={saveAction:'stylio-save-action-v1',keepAwake:'stylio-keep-awake-v1',parallel:'stylio-parallel-v1',originalHint:'stylio-original-hint-v1'};
 export const PROCESSING_STORAGE_KEYS=Object.values(KEYS);
-export function parallelProcessingSupported({userAgent='',platform='',maxTouchPoints=0}=globalThis.navigator||{}){
+export function memoryConstrainedProcessing({userAgent='',platform='',maxTouchPoints=0}=globalThis.navigator||{}){
   const ios=/iPhone|iPad|iPod/i.test(userAgent)||(platform==='MacIntel'&&maxTouchPoints>1);
   const safari=/Safari/i.test(userAgent)&&!/Chrome|Chromium|Edg\/|OPR\/|Android|Firefox/i.test(userAgent);
-  return !ios&&!safari;
+  return ios||safari;
 }
 export function createProcessingPreferences(storage){
   if(storage===undefined)try{storage=globalThis.localStorage;}catch{}
@@ -32,16 +32,14 @@ let instance;
 export const getProcessingPreferences=()=>instance??=createProcessingPreferences();
 
 export function bindProcessingPreferences({doc=globalThis.document,preferences=getProcessingPreferences(),nav=globalThis.navigator}={}){
-  const parallelAllowed=parallelProcessingSupported(nav);
-  if(!parallelAllowed){
-    const hint=doc.getElementById('parallel-hint');if(hint)hint.dataset.i18n='settings.parallelunavailable';
+  if(memoryConstrainedProcessing(nav)){
+    const hint=doc.getElementById('parallel-hint');if(hint)hint.dataset.i18n='settings.parallelmanaged';
   }
   const controls={saveAction:'default-save-action',keepAwake:'keep-screen-awake',parallel:'parallel-processing',originalHint:'original-format-hint'};
   for(const [key,id] of Object.entries(controls)){
     const control=doc.getElementById(id);if(!control)continue;
-    const update=()=>{if(key==='saveAction')control.value=preferences.get(key);else control.checked=key==='parallel'&&!parallelAllowed?false:preferences.get(key);
-      if(key==='parallel'&&!parallelAllowed)control.disabled=true;};
-    update();control.addEventListener('change',()=>{if(key==='parallel'&&!parallelAllowed){update();return;}preferences.set(key,key==='saveAction'?control.value:control.checked);});
+    const update=()=>{if(key==='saveAction')control.value=preferences.get(key);else control.checked=preferences.get(key);};
+    update();control.addEventListener('change',()=>preferences.set(key,key==='saveAction'?control.value:control.checked));
     preferences.subscribe(changed=>{if(changed===key)update();});
   }
 }

@@ -76,6 +76,9 @@ jobs:
       - name: Check application wiring and session cleanup
         run: node --test tests/web/application.mjs tests/web/app-shell.mjs tests/web/stylesheets.mjs
 
+      - name: Check parallel memory budgets and honest model progress
+        run: node --test tests/web/parallel-memory.mjs tests/web/processing-preferences.mjs tests/web/model-download-memory.mjs tests/web/portrait-model-progress.mjs tests/web/portrait-progress.mjs tests/web/startup.mjs
+
       - name: Check static release asset versioning
         run: node --test tests/web/web-release.mjs
 

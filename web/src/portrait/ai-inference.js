@@ -43,7 +43,7 @@ export function inferDepth(rgb, input, {signal, guidance,provider='webgpu',model
     signal?.addEventListener('abort',abort,{once:true});
     worker.onerror = () => finish(Object.assign(Error('AI worker failed'),{stage}));
     worker.onmessage = ({data}) => {
-      if(data.stage){stage=data.stage;if(stage==='download')clearTimeout(timer);else arm();onProgress(stage,data.progress);}
+      if(data.stage){stage=data.stage;if(['download','modelDownload','modelCache'].includes(stage))clearTimeout(timer);else arm();onProgress(stage,data.progress);}
       else if('error' in data)finish(Object.assign(Error(String(data.error??'AI worker failed')||'AI worker failed'),{name:data.errorName||'Error',stage:data.errorStage||stage}));
       else if(data.result)finish(null,data.result);
       else finish(Object.assign(Error('AI worker returned no depth'),{stage}));

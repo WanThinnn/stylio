@@ -46,7 +46,7 @@ test('Adaptive Styles completion notice is gated by the feature and an actual re
   assert.match(app,/function adaptiveStyleCompletionNotice\(ui,recommendation\)\{\s*if\(!aiFeatures\.enabled\('style'\)\|\|!recommendation\)return;\s*ui\.adaptiveStyleAdvice\(aiText\(\)\.styleCompletionNotice\);\s*\}/);
   assert.match(app,/await tryAiPortrait\(null,output,ui,file\.name,file\);\s*adaptiveStyleCompletionNotice\(ui,result\.styleRecommendation\);/,
     'raster guidance should appear only after all selected processing completes');
-  assert.match(app,/await tryAiPortrait\(bytes,shareFile,ui,file\.name,file,preserveIncomplete\);\s*adaptiveStyleCompletionNotice\(ui,adaptiveStyleRecommendation\);/,
+  assert.match(app,/await tryAiPortrait\(bytes,shareFile,ui,file\.name,file,preserveIncomplete\);\}\s*adaptiveStyleCompletionNotice\(ui,adaptiveStyleRecommendation\);/,
     'HEIC guidance should appear only after all selected processing completes');
 });
 

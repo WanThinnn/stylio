@@ -1012,7 +1012,7 @@ test('web processing keeps unknown Apple contracts outside mature native interpr
   assert.doesNotMatch(source,/classifyPhotoContract|preflightLegacyCompatibilityInWorker/);
   assert.match(source,/if \(!preserveIncomplete&&!compatibilityRecovered\)\{/);
   assert.doesNotMatch(source,/if\(compatibilityRecovered\)await tryAiPortrait/);
-  assert.match(source,/if\(!unknownAppleContract\)await tryAiPortrait\(bytes,shareFile/);
+  assert.match(source,/if\(!unknownAppleContract\)\{await releaseConversion\(\);await tryAiPortrait\(bytes,shareFile/);
 });
 
 test('read worker returns classification and preflight alongside the parsed HEIC',async()=>{
