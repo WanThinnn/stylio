@@ -25,6 +25,7 @@ import {registerTmapHdr,editableTmapHeadroom,normalizeAppleLegacyGainSamples,
 import {executeJob} from '../../web/src/media/heic-worker.js';
 import {appleDepthAuxc,readAppleDepthRange} from '../../web/src/portrait/apple-depth-metadata.js';
 import {matchPortraitHdrCapacity,portraitSourceHeadroom} from '../../web/src/portrait/portrait-hdr-calibration.js';
+import {describePortraitScene} from '../../web/src/portrait/portrait-scene-response.js';
 const template=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
 const fixture=JSON.parse(fs.readFileSync(new URL('./raster-hevc.fixture.json',import.meta.url)));
 const assets=await generateSyntheticHevc(null,async(_,o)=>{
@@ -173,6 +174,27 @@ test('iPhone-model raster metadata without a camera MakerNote retains the accept
   const base=photo(900,600),tagged=withCamera(base,'iPhone 16 Pro');
   const maker=source=>{const d=discoverHeic(source);return getMakerNoteBlob(extractItemData(source,d,d.exifItem));};
   assert.deepEqual(maker(buildAiPortrait(tagged,depth,template).data),maker(buildAiPortrait(base,depth,template).data));
+});
+
+test('generated Portrait contract carries the accepted viewer toggle bit',()=>{
+  const output=buildAiPortrait(photo(900,600),depth,template).data,d=discoverHeic(output);
+  const exif=extractItemData(output,d,d.exifItem),tag=extractAppleMakerNoteTag(exif,0x19);
+  const maker=getMakerNoteBlob(exif),little=maker[12]===73;
+  assert.equal(new DataView(tag.payload.buffer,tag.payload.byteOffset,4).getUint32(0,little)&0x20,0x20);
+});
+
+test('legacy camera MakerNotes take the viewer-bit path instead of bypassing the template correction',()=>{
+  for(const model of ['iPhone 7','iPhone 11','iPhone 14 Pro Max']){
+    const base=withCamera(photo(900,600),model),d=discoverHeic(base),ft=topBox(base,'ftyp');
+    let exif=extractItemData(base,d,d.exifItem);
+    for(const [id,value]of [[1,17],[0x19,0x2002]])exif=injectAppleMakerNoteTag(exif,be(value,4),id,9);
+    const maker=getMakerNoteBlob(exif),v=new DataView(maker.buffer,maker.byteOffset,maker.byteLength),le=maker[12]===73;
+    for(let n=0;n<v.getUint16(14,le);n++){const at=16+n*12;if([1,0x19].includes(v.getUint16(at,le)))v.setUint32(at+4,1,le);}
+    const source=rebuildHeic(base,d,base.slice(ft.off,ft.off+ft.size),base.slice(d.meta.off,d.meta.off+d.meta.size),new Map([[d.exifItem,exif]]));
+    const out=buildAiPortrait(source,depth,template).data,after=discoverHeic(out);
+    const flags=extractAppleMakerNoteTag(extractItemData(out,after,after.exifItem),0x19).payload;
+    assert.equal(new DataView(flags.buffer,flags.byteOffset,4).getUint32(0,le),0x2022,model);
+  }
 });
 
 const nativeHdrDirectory=new URL('../private-fixtures/native-hdr-2059/',import.meta.url);
@@ -1141,4 +1163,23 @@ test('focus/aperture changes reuse every encoded image and depth payload',()=>{
     assert.deepEqual(extractItemData(a,ad,id),extractItemData(b,bd,id));
   const did=[...bd.infos.keys()].find(id=>auxUriForItem(bd.props,id)===DEPTH_URI),side=bd.refs.find(r=>r.type==='cdsc'&&r.to.includes(did)).from;
   assert.match(new TextDecoder().decode(extractItemData(b,bd,side)),/SimulatedAperture>2.800000/);
+});
+
+test('scene calibration is fixed per capture while refocusing and changing aperture only update editing metadata',{
+  skip:!fs.existsSync(acceptedJ4Source),
+},async()=>{
+  const {addTexture}=await import('../../web/src/styles/texture.js');
+  const source=addTexture(new Uint8Array(fs.readFileSync(acceptedJ4Source)),{preserveStyles:true}).data;
+  const gray=new Uint8Array(depth.width*depth.height).fill(40);
+  for(let y=24;y<40;y++)for(let x=24;x<40;x++)gray[y*depth.width+x]=200;
+  const sceneProfile=describePortraitScene(gray,depth.width,depth.height);
+  const calibrated={...depth,floatMax:3,relativeResponse:'scene-v3',sceneProfile};
+  const a=buildAiPortrait(source,calibrated,template,{aperture:1.4});
+  const b=buildAiPortrait(source,calibrated,template,{focusX:.2,focusY:.7,aperture:16});
+  assert.equal(a.report.sceneResponseApplied,true);assert.equal(b.report.sceneResponseApplied,true);
+  assert.equal(a.report.disparityMax,b.report.disparityMax);
+  assert.equal(a.report.previewDisparityMax,b.report.previewDisparityMax);
+  const ad=discoverHeic(a.data),bd=discoverHeic(b.data);
+  for(const[id,info]of ad.infos)if(['hvc1','grid'].includes(info.type))
+    assert.deepEqual(extractItemData(a.data,ad,id),extractItemData(b.data,bd,id));
 });

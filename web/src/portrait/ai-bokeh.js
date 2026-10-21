@@ -1,5 +1,6 @@
 // A disk-shaped aperture in linear light, with depth-dependent circle of
 // confusion and foreground rejection. Preview only; Photos renders the saved depth.
+import {FOREGROUND_RESPONSE} from './portrait-scene-response.js';
 const vertex=`#version 300 es
 in vec2 position;out vec2 uv;void main(){uv=position*.5+.5;gl_Position=vec4(position,0,1);}`;
 const fragment=`#version 300 es
@@ -16,10 +17,11 @@ vec2 stored(vec2 p){
 vec3 linearRgb(vec3 s){return pow(max(s,vec3(0)),vec3(2.2));}
 void main(){
  vec2 p=stored(vec2(uv.x,1.-uv.y));float d=texture(depth,p).r;
- // Keep the existing background response, but give the foreground a wider
- // in-focus zone and a gentle roll-off capped at 35% of the background radius.
- float farBlur=clamp((focus-d-.047)/.47,0.,1.);
- float nearBlur=.35*smoothstep(.065,.55,d-focus);
+ // Apply the scene scale to disparity difference, not a pre-saturated curve:
+ // otherwise two affine-equivalent model maps produce different blur radii.
+ // Foreground attenuation remains an explicit preview policy, not Apple's math.
+ float farBlur=max(focus-d,0.);
+ float nearBlur=${FOREGROUND_RESPONSE}*max(d-focus,0.);
  float coc=radius*max(farBlur,nearBlur);
  vec3 original=texture(photo,p).rgb;
  if(coc<.5){colour=vec4(original,1);return;}

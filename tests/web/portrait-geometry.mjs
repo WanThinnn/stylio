@@ -21,7 +21,7 @@ test('bounded optics reader handles both TIFF orders and declines truncated or i
     const exif=opticsExif(little),copy=exif.slice(),o=readPortraitOptics(exif);
     assert.equal(o.focalMm,7);assert.equal(o.equivalentMm,24);assert.equal(o.zoom,2);
     const p=portraitProjection(4000,3000,o);
-    assert.ok(Math.abs(p.fx-5000*48/Math.hypot(36,24))<1e-9);
+    assert.ok(Math.abs(p.fx-5000*24/Math.hypot(36,24))<1e-9);
     assert.equal(p.geometry,'exif-35mm-estimate');assert.equal(p.pixelSize,7/p.fx);
     assert.deepEqual(exif,copy);
     for(const length of [0,4,12,28,40,60])assert.equal(readPortraitOptics(exif.subarray(0,length)),null);
@@ -34,10 +34,12 @@ test('relative blur normalization is resolution invariant, bounded and explicit 
   const profile=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
   const optics={focalMm:6.765,equivalentMm:24};
   const a=relativePortraitResponse(4000,3000,optics,profile,3),b=relativePortraitResponse(8000,6000,optics,profile,3);
-  assert.equal(a.disparityMax,b.disparityMax);assert.equal(a.blurResponse,'projection-v1');
-  assert.deepEqual(relativePortraitResponse(4000,3000,null,profile,3),{disparityMax:3,blurResponse:'relative-unscaled',blurResponseLimited:false});
+  assert.equal(a.disparityMax,b.disparityMax);assert.equal(a.blurResponse,'projection-v2');
+  assert.deepEqual(relativePortraitResponse(4000,3000,null,profile,3),{disparityMax:3*.2,blurResponse:'relative-unscaled',blurResponseLimited:false});
   const wide=relativePortraitResponse(4000,3000,{focalMm:1,equivalentMm:10},profile,3);
-  assert.equal(wide.disparityMax,24);assert.equal(wide.blurResponseLimited,true);
+  assert.equal(wide.disparityMax,24*.2);assert.equal(wide.blurResponseLimited,true);
+  const legacy=relativePortraitResponse(4000,3000,optics,profile,3,'projection-v1');
+  assert.equal(a.disparityMax,legacy.disparityMax*.2,'device-accepted f/16 response correction');
   assert.throws(()=>relativePortraitResponse(4,3,optics,profile,0),/Invalid/);
 });
 

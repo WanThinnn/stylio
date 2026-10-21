@@ -24,6 +24,7 @@ const debugArg=argv.find(x=>x.startsWith('--debug-depth='))?.slice(14),debugDept
 const model=argv.find(x=>x.startsWith('--model='))?.slice(8)||'standard';
 const provider=argv.find(x=>x.startsWith('--provider='))?.slice(11)||'webgpu';
 const aperture=Number(argv.find(x=>x.startsWith('--aperture='))?.slice(11)||'1.4');
+const texture=argv.includes('--texture');
 if(!['lite','standard','pro'].includes(model)||!['webgpu','wasm'].includes(provider)||!Number.isFinite(aperture)||aperture<1||aperture>22)throw Error('Invalid arguments');
 if(!existsSync(input))throw Error('Input does not exist');
 if(native&&!existsSync(native))throw Error('Native reference does not exist');
@@ -104,10 +105,11 @@ try{
     pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));
   });
   await cdp('Runtime.enable');await cdp('Page.enable');await sleep(600);
-  const cfg={base:'http://127.0.0.1:'+port,model,provider,aperture,focus,save:Boolean(save),debugDepth:Boolean(debugDepth)};
+  const cfg={base:'http://127.0.0.1:'+port,model,provider,aperture,texture,focus,save:Boolean(save),debugDepth:Boolean(debugDepth)};
   const expression='(async cfg=>{'+
-    "const data=new Uint8Array(await fetch(cfg.base+'/__input__').then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer()}));"+
+    "let data=new Uint8Array(await fetch(cfg.base+'/__input__').then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer()}));"+
     "const file=new File([data],'input.HEIC',{type:'image/heic'});"+
+    "if(cfg.texture){const {addTexture}=await import(cfg.base+'/web/src/styles/texture.js');data=addTexture(data,{preserveStyles:true}).data;}"+
     "const [{createAiPortrait},{exportAiPortrait}]=await Promise.all(["+
       "import(cfg.base+'/web/src/portrait/ai-portrait.js'),import(cfg.base+'/web/src/portrait/ai-portrait-export.js')]);"+
     "const events=[],started=performance.now();"+
@@ -118,7 +120,7 @@ try{
     "const chosenFocus=cfg.focus.source==='native-xmp'?cfg.focus:(result.suggestedFocus||cfg.focus);"+
     "const updated=await output.withSettings({focusX:chosenFocus.x,focusY:chosenFocus.y,aperture:cfg.aperture});"+
     "if(cfg.save){const saved=await fetch(cfg.base+'/__save__',{method:'POST',body:updated.data});if(!saved.ok)throw Error('save '+saved.status);}"+
-    "const report={bytes:updated.data.length,ms:Math.round(performance.now()-started),subjectReport:result.subjectReport,foregroundReport:result.foregroundReport,suggestedFocus:result.suggestedFocus,focus:chosenFocus,events,model:cfg.model,provider:cfg.provider,aperture:cfg.aperture};"+
+    "const report={bytes:updated.data.length,ms:Math.round(performance.now()-started),subjectReport:result.subjectReport,foregroundReport:result.foregroundReport,suggestedFocus:result.suggestedFocus,sceneProfile:result.sceneProfile,exportReport:updated.report,focus:chosenFocus,events,model:cfg.model,provider:cfg.provider,aperture:cfg.aperture};"+
     "output.dispose();return report;"+
     '})('+JSON.stringify(cfg)+')';
   const out=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},1200000);

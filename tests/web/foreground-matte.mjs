@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {analyzeForegroundMatte,fuseForegroundMattes,foregroundFocusPoint,mattePromptPoints,dominantForegroundMatte} from '../../web/src/portrait/foreground-matte.js';
+import {analyzeForegroundMatte,fuseForegroundMattes,foregroundFocusPoint,mattePromptPoints,dominantForegroundMatte,selectGeneratedPortraitMatte} from '../../web/src/portrait/foreground-matte.js';
 import {foregroundImageInput,foregroundOutputMatte} from '../../web/src/portrait/foreground-matte-model.js';
 import * as foreground from '../../web/src/portrait/foreground-matte.js';
 
@@ -73,6 +73,34 @@ test('dominantForegroundMatte isolates the largest confident subject and nearby 
   assert.ok(out.confidence[10*w+14]>31,'near soft support should remain with dominant subject');
   assert.equal(out.confidence[6*w+21],0,'smaller disconnected confident component is not a focus anchor');
   assert.equal(out.report.ignoredComponents,1);
+});
+
+test('generated Portrait selection rejects fragmented and ambiguous edge-entering scene saliency',()=>{
+  const w=100,h=80;
+  const fragmented=matte(w,h,(x,y)=>((x%19)<3&&(y%17)<3)?250:0);
+  const sparse=selectGeneratedPortraitMatte({confidence:fragmented,width:w,height:h,source:'isnet'},w,h);
+  assert.equal(sparse.matte,null);assert.equal(sparse.report.reason,'fragmented');
+  const border=matte(w,h,(x,y)=>x>=65&&y>=15&&y<65?250:(x>=12&&x<27&&y>=25&&y<55?248:0));
+  const entering=selectGeneratedPortraitMatte({confidence:border,width:w,height:h,source:'isnet'},w,h);
+  assert.equal(entering.matte,null);assert.equal(entering.report.reason,'border-ambiguous');
+});
+
+test('generated Portrait selection keeps a single coherent subject even when tightly cropped',()=>{
+  const w=100,h=80,confidence=matte(w,h,(x,y)=>x>=68&&y>=16&&y<67?250:0);
+  const selected=selectGeneratedPortraitMatte({confidence,width:w,height:h,source:'isnet'},w,h);
+  assert.ok(selected.matte);assert.equal(selected.report.applied,true);assert.equal(selected.report.dominance,1);
+});
+
+test('generated Portrait selection keeps one coherent interior subject and removes detached saliency',()=>{
+  const w=100,h=80,confidence=matte(w,h,(x,y)=>{
+    if(x>=34&&x<66&&y>=18&&y<67)return 250;
+    if(x>=82&&x<88&&y>=25&&y<31)return 252;
+    return 0;
+  });
+  const selected=selectGeneratedPortraitMatte({confidence,width:w,height:h,source:'isnet'},w,h);
+  assert.ok(selected.matte);assert.equal(selected.report.applied,true);
+  assert.ok(selected.matte.confidence[40*w+50]>=224);
+  assert.equal(selected.matte.confidence[27*w+84],0);
 });
 
 test('Portrait anchor retains PEM-connected fingers and metal when skin is split by occlusion',()=>{

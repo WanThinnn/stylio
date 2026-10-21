@@ -61,7 +61,7 @@ function nativePortraitMaker(sourceExif,{viewerDepth=false}={}){
   return maker;
 }
 function makerBlob(template,sourceMarker,sourceExif){
-  const native=nativePortraitMaker(sourceExif);
+  const native=nativePortraitMaker(sourceExif,{viewerDepth:true});
   if(native)return native;
   const little=template.makerLittle,write=(n,size)=>little?be(n,size).reverse():be(n,size);
   // Live Photo identity belongs to the source, never the Portrait template.
@@ -167,9 +167,9 @@ export function buildAiPortrait(source,depth,template,{focusX=.5,focusY=.5,apert
     throw Error('Invalid Portrait focus/aperture');
   let response;
   if(depth.relativeResponse!==undefined){
-    if(depth.relativeResponse!=='projection-v1'||depth.nativeAuxc||depth.nativeXmp!==undefined||(depth.floatMin!==undefined&&depth.floatMin!==0))
+    if(!['projection-v1','projection-v2','scene-v3'].includes(depth.relativeResponse)||depth.nativeAuxc||depth.nativeXmp!==undefined||(depth.floatMin!==undefined&&depth.floatMin!==0))
       throw Error('Unsupported relative Portrait response');
-    response=sourcePortraitResponse(source,d,template,depth.floatMax);
+    response=sourcePortraitResponse(source,d,template,depth.floatMax,depth.relativeResponse,depth.sceneProfile);
     depth={...depth,floatMax:response.disparityMax};
   }
   const metadata=portraitDepthMetadata(source,d,depth,template,aperture);
@@ -380,7 +380,8 @@ export async function exportAiPortrait(result,onProgress=()=>{},{signal}={}){
     signal?.throwIfAborted();
     const encoded=await encodeHevcPixels(result.gray,{width:result.width,height:result.height,pixelFormat:'gray',fullRange:true,lossless:true},onProgress);
     signal?.throwIfAborted();
-    const depth={...encoded,width:result.width,height:result.height,floatMax:result.disparityMax??1,relativeResponse:'projection-v1'};
+    const depth={...encoded,width:result.width,height:result.height,floatMax:result.disparityMax??1,
+      relativeResponse:'scene-v3',sceneProfile:result.sceneProfile};
     const assembler=portraitAssembler(legacyHdr?.data||result.sourceData,depth,template,{signal,
       legacyHdrNormalized:Boolean(legacyHdr)});
     const initial={focusX:result.suggestedFocus?.x??.5,focusY:result.suggestedFocus?.y??.5,aperture:4.5};

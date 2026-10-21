@@ -8,6 +8,9 @@
  * exercises browsers whose ImageBitmap decoder rejects that JPEG.
  * --source-root=<snapshot-root> serves web/src from an isolated historical
  * snapshot while keeping large runtime assets and private inputs local.
+ * --decode-fallback rejects browser JPEG decode to exercise the FFmpeg base path.
+ * --allow-sdr --portrait [--aperture=16] tests a fresh ordinary JPEG through
+ * raster import and the real Portrait controller, without a previous export.
  */
 import {createServer} from 'node:http';
 import {readFile,mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
@@ -21,10 +24,17 @@ const root=fileURLToPath(new URL('../',import.meta.url));
 const sourceRootArg=process.argv.find(arg=>arg.startsWith('--source-root='))?.slice(14)||null;
 const sourceRoot=sourceRootArg?resolve(root,sourceRootArg):null;
 const input=process.argv.find(arg=>/\.(jpe?g)$/i.test(arg))||'tests/private-fixtures/HDR_Input/IDG_20251020_121945_809.JPEG';
+const inputFull=resolve(root,input);
 const model=process.argv.find(arg=>arg.startsWith('--model='))?.slice(8)||'lite';
 const detail=!process.argv.includes('--no-detail');
 const portraitInput=process.argv.find(arg=>arg.startsWith('--portrait-input='))?.slice(17)||null;
+const portraitInputFull=portraitInput?resolve(root,portraitInput):null;
 const bitmapFallback=process.argv.includes('--bitmap-fallback');
+const decodeFallback=process.argv.includes('--decode-fallback');
+const allowSdr=process.argv.includes('--allow-sdr');
+const portrait=Boolean(portraitInput)||process.argv.includes('--portrait');
+const aperture=Number(process.argv.find(arg=>arg.startsWith('--aperture='))?.slice(11)||'4.5');
+if(!Number.isFinite(aperture)||aperture<1||aperture>22)throw Error('Invalid --aperture');
 if(!['lite','standard','pro'].includes(model))throw Error('Invalid --model');
 const saveArg=process.argv.find(arg=>arg.startsWith('--save='))?.slice(7)||null;
 const saveFull=saveArg?resolve(root,saveArg):null;
@@ -43,6 +53,14 @@ const headers={'Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Embedder
  'Cross-Origin-Resource-Policy':'cross-origin','Access-Control-Allow-Origin':'*','Cache-Control':'no-store'};
 const server=createServer(async(req,res)=>{
  const path=decodeURIComponent(new URL(req.url,'http://local').pathname);
+ if(path==='/__input__'){
+  try{const data=await readFile(inputFull);res.writeHead(200,{...headers,'Content-Type':'image/jpeg'});res.end(data);}
+  catch{res.writeHead(404,headers);res.end();}return;
+ }
+ if(path==='/__portrait_input__'&&portraitInputFull){
+  try{const data=await readFile(portraitInputFull);res.writeHead(200,{...headers,'Content-Type':'image/heic'});res.end(data);}
+  catch{res.writeHead(404,headers);res.end();}return;
+ }
  if(path==='/__save__'&&req.method==='POST'){
   if(!saveFull){res.writeHead(403,headers);res.end('save disabled');return;}
   const chunks=[];let total=0;
@@ -97,26 +115,28 @@ try{
  });
  await cdp('Runtime.enable');await cdp('Page.enable');await sleep(1000);
  const base='http://127.0.0.1:'+port;
- const cfg={base,input,model,detail,portraitInput,bitmapFallback,save:Boolean(saveFull)};
+ const cfg={base,input:'/__input__',inputName:inputFull.split(/[\\/]/).at(-1),model,detail,
+   portraitInput:portraitInput?'/__portrait_input__':null,portrait,aperture,allowSdr,bitmapFallback,decodeFallback,save:Boolean(saveFull)};
  const expression='(async cfg=>{'+
    "const [{importRaster},{discoverHeic,extractItemData},{parseTmapMetadata}]=await Promise.all(["+
    "import(cfg.base+'/web/src/raster/raster-import.js'),"+
    "import(cfg.base+'/web/src/raster/heif.js'),"+
    "import(cfg.base+'/web/src/raster/jpeg-hdr.js')]);"+
-   "const source=new Uint8Array(await fetch(cfg.base+'/'+cfg.input).then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer();}));"+
+   "const source=new Uint8Array(await fetch(cfg.base+cfg.input).then(r=>{if(!r.ok)throw Error('input '+r.status);return r.arrayBuffer();}));"+
    "const events=[],started=performance.now();"+
-   "const name=cfg.input.split('/').at(-1);"+
+   "const name=cfg.inputName;"+
    "const sourceFile=new File([source],name,{type:'image/jpeg'});"+
-   "const result=cfg.portraitInput?{hdr:true,data:new Uint8Array(await fetch(cfg.base+'/'+cfg.portraitInput).then(r=>r.arrayBuffer()))}:await importRaster(sourceFile,null,"+
+   "if(cfg.decodeFallback){globalThis.createImageBitmap=()=>Promise.reject(Error('forced JPEG decoder failure'));globalThis.Image=class{set src(value){}decode(){return Promise.reject(Error('forced JPEG element failure'));}};}"+
+   "const result=cfg.portraitInput?{hdr:true,data:new Uint8Array(await fetch(cfg.base+cfg.portraitInput).then(r=>r.arrayBuffer()))}:await importRaster(sourceFile,null,"+
    "progress=>{if(progress.stage&&(!events.length||events.at(-1)!==progress.stage))events.push(progress.stage);},"+
    "{analyze:true,detail:cfg.detail?{modelId:cfg.model,provider:'webgpu'}:null});"+
-   "if(!result.hdr)throw Error('Result is not HDR');"+
+   "if(!result.hdr&&!cfg.allowSdr)throw Error('Result is not HDR');"+
    "if(cfg.detail&&!result.detailApplied)throw Error('AI detail was not applied: '+String(result.detailSkipped||'unknown'));"+
-   "if(cfg.portraitInput){"+
+   "if(cfg.portrait){"+
    "if(cfg.bitmapFallback){const bitmap=globalThis.createImageBitmap;globalThis.createImageBitmap=(b,...args)=>b.type==='image/jpeg'?Promise.reject(Error('JPEG ImageBitmap unavailable')):bitmap(b,...args);}"+
    "const {createPortraitController}=await import(cfg.base+'/web/src/app/processing/portrait-controller.js');"+
    "const candidates=[],cleanup=[],notes=[];let published,stage;"+
-   "const ui={progress(){},aiState(next){if(stage!==next){stage=next;console.info('[portrait-smoke]',next);}},note(message){if(message)notes.push(message);},aiBusy(){},cancelAi(){return()=>{};},cleanup(fn){cleanup.push(fn);},output(file){published=file;},async portraitPreview(){},aiView(){}};"+
+   "const ui={progress(){},aiState(next){if(stage!==next){stage=next;console.info('[portrait-smoke]',next);}},note(message){if(message)notes.push(message);},aiBusy(){},cancelAi(){return()=>{};},cleanup(fn){cleanup.push(fn);},output(file){published=file;},async portraitPreview(result,update){await update({focusX:result.suggestedFocus?.x??.5,focusY:result.suggestedFocus?.y??.5,aperture:cfg.aperture},()=>true);},aiView(){}};"+
    "const controller=createPortraitController({aiFeatures:{enabled:id=>id==='portrait'},aiCandidates:candidates,aiText:()=>new Proxy({},{get:(_,k)=>String(k)}),gpuAcceleration:{checked:true},selectedAiLevel:()=>cfg.model});"+
    "await controller.tryAiPortrait(null,new File([result.data],'styles.HEIC',{type:'image/heic'}),ui,name,sourceFile);"+
    "if(candidates[0]?.state!=='done')throw Error('Portrait controller failed: '+JSON.stringify(notes));"+
@@ -125,6 +145,7 @@ try{
    "const d=discoverHeic(result.data);"+
    "if(d.hdrGrid===null||!d.hdrTiles.length)throw Error('Output HDR gain map missing');"+
    "if(d.stylesItem===null)throw Error('Generated Styles item missing');"+
+   "if(!result.hdr){if(cfg.save){const saved=await fetch(cfg.base+'/__save__',{method:'POST',body:result.data});if(!saved.ok)throw Error('save '+saved.status);}return {model:cfg.model,inputBytes:source.length,outputBytes:result.data.length,ms:Math.round(performance.now()-started),geometry:result.geometry,portrait:cfg.portrait,aperture:cfg.aperture,hdr:false,events};}"+
    "const pair=[...d.infos].find(([id,info])=>info.type==='tmap'&&d.refs.some(r=>r.type==='dimg'&&r.from===id&&r.to[0]===d.primary&&r.to.length>=2));"+
    "if(!pair)throw Error('ISO tmap metadata missing');"+
    "const tmapInputs=d.refs.find(r=>r.type==='dimg'&&r.from===pair[0]).to,isoGain=tmapInputs[1];"+
@@ -144,6 +165,6 @@ try{
 }finally{
  try{socket?.close();}catch{}
  child.kill();
- await new Promise(r=>server.close(r));
+ server.closeAllConnections();await new Promise(r=>server.close(r));
  try{await rm(profile,{recursive:true,force:true,maxRetries:5,retryDelay:300});}catch{}
 }

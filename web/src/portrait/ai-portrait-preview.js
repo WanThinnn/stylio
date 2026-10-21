@@ -1,12 +1,12 @@
 import {createBokehRenderer} from './ai-bokeh.js';
 import {displayPointToStored} from '../raster/heif.js';
 import {latestSettingsWriter} from './ai-portrait-assembler.js';
+import {portraitPreviewBlur} from './portrait-scene-response.js';
 const APERTURES=[1.4,1.6,1.8,2,2.2,2.5,2.8,3.2,3.5,4,4.5,5,5.6,6.3,7.1,8,9,10,11,13,14,16,null];
 const DEFAULT_APERTURE=APERTURES.indexOf(4.5);
 const selectedAperture=input=>APERTURES[Number(input.value)];
 const apertureLabel=value=>value===null?'Off':`f/${value<10?value.toFixed(1):value}`;
-// Keep the existing preview calibration. Off draws the unblurred source.
-const previewBlur=value=>value===null?0:Math.max(0,8-5*Math.log2(value/4.5));
+const previewBlur=portraitPreviewBlur;
 // A native range owns touch, keyboard and assistive-technology interaction.
 // The ruler is decorative; its wave follows the value without a render loop.
 function apertureControl(input,strings){

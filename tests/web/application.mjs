@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {createAiFeatureControls} from '../../web/src/ui/ai-feature-controls.js';
 import {createTaskQueue} from '../../web/src/app/processing/task-queue.js';
-import {createProcessingPreferences,PROCESSING_STORAGE_KEYS} from '../../web/src/ui/processing-preferences.js';
+import {createProcessingPreferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported} from '../../web/src/ui/processing-preferences.js';
 import {createScreenAwake} from '../../web/src/ui/screen-awake.js';
 
 // Exercise application wiring without downloading models, spawning workers or
@@ -12,7 +12,7 @@ import {createScreenAwake} from '../../web/src/ui/screen-awake.js';
 const source=readFileSync(new URL('../../web/src/app/application.js',import.meta.url),'utf8')
   .replace(/^import .*;\n/gm,'').replace('export function startApplication','function startApplication');
 const resultViewSource=readFileSync(new URL('../../web/src/ui/results/result-view.js',import.meta.url),'utf8');
-function harness({manualQueue=false,historyEntries=[],stallPreload=false,stallHistory=false,uncontrolled=false}={}){
+function harness({manualQueue=false,historyEntries=[],stallPreload=false,stallHistory=false,uncontrolled=false,nav={}}={}){
   const nodes=new Map(),calls=[],captured={},batches=new Map();
   const preferences=createProcessingPreferences({getItem:()=>null,setItem(){}});
   function batchFor(name){
@@ -46,7 +46,7 @@ function harness({manualQueue=false,historyEntries=[],stallPreload=false,stallHi
     document:{getElementById:node,createElement:node,querySelectorAll:()=>[]},
     getAppShell:()=>({register(){},render(){}}),confirm:()=>true,
     localStorage:{getItem:()=>null,setItem(){}},sessionStorage:{getItem:()=>true},
-    navigator:{serviceWorker:{controller:uncontrolled?null:{postMessage:message=>calls.push(['worker',message.type])},
+    navigator:{...nav,serviceWorker:{controller:uncontrolled?null:{postMessage:message=>calls.push(['worker',message.type])},
       ready:Promise.resolve({active:{postMessage:message=>calls.push(['worker',message.type])}})}},
     matchMedia:()=>({matches:false}),
     VERSION:'test',AI_STRINGS:{en:{},vi:{}},pickLanguage:()=> 'en',
@@ -56,7 +56,7 @@ function harness({manualQueue=false,historyEntries=[],stallPreload=false,stallHi
     loadLibheif:async()=>{},releaseDecodeCache(){},releaseHevcEncoder(){},releaseRasterEncoder(){},releaseHeicProcessor(){},
     clearDownloadedAssets:async()=>{},waitForVisiblePage:async()=>{},
     createPhotoAnalysis:deps=>{captured.analysis=deps;return {kind:'analysis'};},
-    getProcessingPreferences:()=>preferences,PROCESSING_STORAGE_KEYS,createTaskQueue,createScreenAwake,
+    getProcessingPreferences:()=>preferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported,createTaskQueue,createScreenAwake,
     createIsolatedProcessor:()=>({handleFile:(file,ui)=>handleFile(file,ui,1),releaseResources:async()=>{},dispose(){}}),
     createLivePhotoSession:deps=>{captured.live=deps;return {liveMovies:new Map(),livePhotos:[],attachMovie(){},handleMovie(){}};},
     createProfileRepository:()=>({preload:async()=>{calls.push(['profiles']);if(stallPreload)await new Promise(()=>{});},ensureProfileIndex(){},getProfile(){}}),
@@ -189,6 +189,19 @@ test('parallel preference starts two isolated lanes and changing it does not int
   h.release('second');await h.waitForStart('third');h.release('third');
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(h.node('clear-assets').disabled,false);
+});
+
+test('iOS and Safari never start a second photo runtime even with parallel saved on',async()=>{
+  for(const nav of [{userAgent:'iPhone Version/27 Safari/605.1'},
+    {userAgent:'Macintosh Version/27 Safari/605.1'},
+    {userAgent:'Macintosh',platform:'MacIntel',maxTouchPoints:5}]){
+    const h=harness({manualQueue:true,nav});await h.start();h.preferences.set('parallel',true);
+    h.node('file').files=['first','second'];await h.node('file').fire('change');
+    await h.waitForStart('first');await new Promise(resolve=>setImmediate(resolve));
+    try{assert.deepEqual(h.calls.filter(([type])=>type==='start'),[['start','first',0]],'one runtime owns the mobile codec/model budget');}
+    finally{h.release('first');h.release('second');}
+    await h.waitForStart('second');h.release('second');
+  }
 });
 
 test('clearing history releases result cleanups and clears the shared Live Photo/AI session',async()=>{

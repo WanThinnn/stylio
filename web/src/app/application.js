@@ -20,7 +20,7 @@ import {createPortraitController} from './processing/portrait-controller.js';
 import {createFileProcessor} from './processing/file-processor.js';
 import {createTaskQueue} from './processing/task-queue.js';
 import {createIsolatedProcessor} from './processing/isolated-processor.js';
-import {getProcessingPreferences,PROCESSING_STORAGE_KEYS} from '../ui/processing-preferences.js';
+import {getProcessingPreferences,PROCESSING_STORAGE_KEYS,parallelProcessingSupported} from '../ui/processing-preferences.js';
 import {createScreenAwake} from '../ui/screen-awake.js';
 
 // App wiring and session lifecycle; domain workflows live in their modules.
@@ -247,7 +247,7 @@ export function startApplication(){
   const processingDependencies={row,T,getLanguage:()=>lang,aiText,aiFeatures,aiCandidates,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis};
   const processor=createFileProcessor(processingDependencies);
   const queue=createTaskQueue({
-    concurrency:()=>preferences.get('parallel')?2:1,
+    concurrency:()=>preferences.get('parallel')&&parallelProcessingSupported(navigator)?2:1,
     onChange:state=>{pendingTasks=state.pending;refreshHistoryButton();screenAwake?.setBusy(state.active>0);},
     async run(job,lane){
       if(job.task)return job.task();

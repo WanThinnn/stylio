@@ -86,7 +86,7 @@ jobs:
         run: node --test tests/web/ai-portrait-source.mjs tests/web/portrait-controller.mjs
 
       - name: Check Portrait matte guidance and depth fusion
-        run: node --test tests/web/foreground-matte.mjs tests/web/subject-matte.mjs tests/web/subject-depth-guidance.mjs tests/web/portrait-orchestration.mjs
+        run: node --test tests/web/foreground-matte.mjs tests/web/subject-matte.mjs tests/web/subject-depth-guidance.mjs tests/web/portrait-orchestration.mjs tests/web/portrait-scene-response.mjs
 
       - name: Check AI feature and photo export regressions
         run: node --test tests/web/ai-feature-controls.mjs tests/web/ai-style-orchestration.mjs tests/web/style-analysis.mjs tests/web/style-inference.mjs tests/web/style-model.mjs tests/web/style-quality.mjs tests/web/style-semantic-axes.mjs tests/web/style-scene-decision.mjs tests/web/style-recommender.mjs tests/web/style-display-render.mjs tests/web/style-reference-bank.mjs tests/web/style-selection.mjs tests/web/ai-portrait-export.mjs tests/web/portrait-geometry.mjs tests/web/depth-refinement.mjs tests/web/ai-portrait.mjs tests/web/native-base-analysis.mjs tests/web/apple-depth.mjs tests/web/jpeg-hdr.mjs tests/web/heic-worker.mjs tests/web/raster-import.mjs tests/web/lifecycle.mjs tests/web/style-preservation.mjs tests/web/texture-compatibility.mjs

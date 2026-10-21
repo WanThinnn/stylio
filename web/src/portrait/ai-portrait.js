@@ -8,8 +8,9 @@ import {readApplePortraitMatte,readAppleSkinMatte} from './person-depth-guidance
 import {depthModel} from './depth-models.js';
 import {refinePortraitSubject} from './subject-inference.js';
 import {inferForegroundMatte} from './foreground-matte-inference.js';
-import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor} from './foreground-matte.js';
+import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte} from './foreground-matte.js';
 import {fusePortraitDepth} from './subject-depth-guidance.js';
+import {describePortraitScene} from './portrait-scene-response.js';
 
 export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{signal,provider='webgpu',modelId='standard'}={}) {
   depthModel(modelId);
@@ -83,11 +84,12 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
     // group preserves held metal and occluded fingers while excluding detached
     // foreground detections on unrelated background objects.
     const focusAnchor=portraitFocusAnchor(appleMatte,skinMatte,width,height);
-    matte=fuseForegroundMattes(focusAnchor,generatedMatte,width,height);
+    const generatedSelection=focusAnchor?null:selectGeneratedPortraitMatte(generatedMatte,width,height);
+    matte=fuseForegroundMattes(focusAnchor,focusAnchor?generatedMatte:generatedSelection?.matte,width,height);
     if(matte){
       foregroundReport={...foregroundReport,apple:appleMatte?.report??null,skin:skinMatte?.report??null,
         anchor:focusAnchor?.report??null,anchorSource:focusAnchor?.source??null,
-        generated:generatedMatte?.report??null,fused:matte.report??null};
+        generated:generatedMatte?.report??null,generatedSelection:generatedSelection?.report??null,fused:matte.report??null};
       try{
         onProgress('subjectRefining');
         const subject=await refinePortraitSubject(matte,previewRgb,width,height,orientation,{signal,provider:usedProvider,onProgress});
@@ -109,10 +111,13 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         suggestedFocus={x:focus.x,y:focus.y,displayX:display.x,displayY:display.y,confidence:focus.confidence};
       }
     }else{
-      foregroundReport={apple:null,generated:null,fused:null,reason:'no-foreground-guidance'};
+      foregroundReport={...foregroundReport,apple:appleMatte?.report??null,skin:skinMatte?.report??null,
+        anchor:null,anchorSource:null,generated:generatedMatte?.report??null,
+        generatedSelection:generatedSelection?.report??null,fused:null,reason:'no-foreground-guidance'};
     }
 
-    return {gray,subjectReport,foregroundReport,suggestedFocus,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,
+    const sceneProfile=describePortraitScene(gray,width,height,{focusX:suggestedFocus?.x??.5,focusY:suggestedFocus?.y??.5,matte});
+    return {gray,subjectReport,foregroundReport,suggestedFocus,sceneProfile,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,
       sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,
       provider:usedProvider,modelId};
   } finally { if(source)source.width=source.height=0; }

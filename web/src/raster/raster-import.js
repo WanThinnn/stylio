@@ -258,6 +258,30 @@ async function openBrowserImage(file, onProgress, {reportFailure = true} = {}) {
   return { image, close };
 }
 
+async function openHdrBaseImage(hdr,orientation,colorSpace,onProgress){
+  try{return await openBrowserImage(new File([hdr.base],'base.jpeg',{type:'image/jpeg'}),onProgress,{reportFailure:false});}
+  catch(browserError){
+    // Safari can reject the base member after it notices the original JPEG's
+    // MPF/HDR structure, even though that extracted member is valid JPEG. The
+    // gain-map path already has a deterministic FFmpeg decoder; use the same
+    // decoder for the display base instead of rejecting a valid Indigo photo.
+    onProgress?.({stage:'codec',operation:'decode',source:'FFmpeg.wasm / JPEG HDR base',
+      browserDecodeError:String(browserError?.message||browserError)});
+    const decoded=await decodeJpegYuv(hdr.base,{width:hdr.width,height:hdr.height,orientation},onProgress);
+    const rgba=yuv420ToRgba(decoded.bytes,decoded.width,decoded.height);
+    const canvas=document.createElement('canvas');canvas.width=decoded.width;canvas.height=decoded.height;
+    const ctx=canvas.getContext('2d',{alpha:false,colorSpace});
+    if(!ctx)throw Error('HDR JPEG fallback canvas unavailable');
+    const actual=ctx.getContextAttributes?.().colorSpace;
+    if(actual&&actual!==colorSpace)throw Error(`HDR JPEG fallback lost ${colorSpace} colour space`);
+    let pixels;
+    try{pixels=new ImageData(rgba,decoded.width,decoded.height,{colorSpace});}
+    catch{pixels=ctx.createImageData(decoded.width,decoded.height);pixels.data.set(rgba);}
+    ctx.putImageData(pixels,0,0);
+    return {image:canvas,close(){canvas.width=canvas.height=0;},decoderFallback:true};
+  }
+}
+
 export function sampleRasterLuma(image, width = 256, height = 192) {
   const canvas = document.createElement("canvas");
   canvas.width = width; canvas.height = height;
@@ -841,9 +865,9 @@ async function importHdrJpeg(hdr,sourceBytes,onProgress,{analyze,detail=null,sty
     // canvas route's 270-degree stored image. All template items share this irot.
     const pd=discoverHeic(profile.meta);
     for(const property of pd.props.properties)if(property.type==='irot')profile.meta[property.box.off+property.box.hdr]=0;
-    opened=await openBrowserImage(new File([hdr.base],'base.jpeg',{type:'image/jpeg'}),onProgress);
     const color={primaries:hdr.primaries,transfer:'iec61966-2-1',matrix:'smpte170m',fullRange:true};
     const colorSpace=hdr.primaries==='smpte432'?'display-p3':'srgb';
+    opened=await openHdrBaseImage(hdr,orientation,colorSpace,onProgress);
     let working=opened.image,detailSkipped=null,rebase=null,decodedGain=null;
     if(detail){
       try{

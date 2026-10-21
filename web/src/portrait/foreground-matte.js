@@ -91,6 +91,28 @@ export function dominantForegroundMatte(matte,width,height){
   }};
 }
 
+// Without an Apple PEM/skin anchor, a generated semantic matte is only useful
+// when it describes one substantial, self-contained subject. Fragmented masks
+// and masks entering from an image edge are commonly foliage, seats, or other
+// salient scene regions; forcing all of them onto one focus plane corrupts an
+// otherwise useful monocular depth map. Fail closed to raw depth in those cases.
+export function selectGeneratedPortraitMatte(matte,width,height){
+  const input=matteInput(matte,width,height,'generated Portrait');
+  if(!input)return {matte:null,report:{applied:false,reason:'missing'}};
+  const analysis=analyzeForegroundMatte(input.confidence,width,height);
+  const anchor=componentsAt(input.confidence,width,height)[0];
+  if(!anchor)return {matte:null,report:{...analysis,applied:false,reason:'no-confident-foreground'}};
+  const minimumPixels=Math.max(16,Math.round(width*height*.005));
+  const dominance=analysis.confidentForeground?anchor.pixels/analysis.confidentForeground:0;
+  let reason=null;
+  if(anchor.pixels<minimumPixels)reason='fragmented';
+  else if(dominance<.6)reason='ambiguous-components';
+  else if(anchor.touchesBorder&&dominance<.9)reason='border-ambiguous';
+  if(reason)return {matte:null,report:{...analysis,applied:false,reason,anchorPixels:anchor.pixels,minimumPixels,dominance}};
+  const selected=dominantForegroundMatte(input,width,height);
+  return {matte:selected,report:{...selected.report,applied:true,reason:'coherent-subject',minimumPixels,dominance}};
+}
+
 // PEM describes the whole foreground, including non-skin objects and fingers
 // disconnected in the skin matte by an occluding object. Skin can supply an
 // anchor only when PEM has no usable foreground; it must not replace PEM.

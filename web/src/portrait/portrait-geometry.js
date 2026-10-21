@@ -56,10 +56,10 @@ export function portraitProjection(width,height,optics){
     if(validFocal(x)&&validFocal(y)){fx=x;fy=y;pixelSize=focal/fx;geometry='exif-focal-plane-estimate';}
   }
   if(geometry==='relative-image-grid'&&optics?.equivalentMm>=1&&optics.equivalentMm<=2000){
-    // CIPA's 35 mm equivalence uses the 36x24 mm diagonal. EXIF excludes
-    // digital zoom; apply an explicit, valid zoom exactly once here.
-    const zoom=optics.zoom>=1&&optics.zoom<=100?optics.zoom:1;
-    const estimate=diagonal*optics.equivalentMm*zoom/Math.hypot(36,24);
+    // The 35mm equivalent describes the captured field of view. In the actual
+    // iPhone fixtures it already includes the digital crop (53mm ~= 28mm*1.885).
+    // Multiplying DigitalZoomRatio again fabricated a second crop.
+    const estimate=diagonal*optics.equivalentMm/Math.hypot(36,24);
     if(validFocal(estimate)){
       fx=fy=estimate;if(focal>0)pixelSize=focal/fx;
       geometry='exif-35mm-estimate';

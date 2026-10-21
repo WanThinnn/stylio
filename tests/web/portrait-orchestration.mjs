@@ -5,8 +5,9 @@ import {runInNewContext} from 'node:vm';
 import {inferDepth} from '../../web/src/portrait/ai-inference.js';
 import {depthModel} from '../../web/src/portrait/depth-models.js';
 import {shapeAiDisparity,AI_DISPARITY_MAX} from '../../web/src/portrait/ai-depth-refinement.js';
-import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor} from '../../web/src/portrait/foreground-matte.js';
+import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte} from '../../web/src/portrait/foreground-matte.js';
 import {fusePortraitDepth} from '../../web/src/portrait/subject-depth-guidance.js';
+import {describePortraitScene} from '../../web/src/portrait/portrait-scene-response.js';
 
 // Exercise the actual orchestration with model/decode boundaries substituted.
 // Timeout cases use the real worker watchdog, not a hand-created error name.
@@ -18,7 +19,7 @@ function harness({apple=true,foreground,subject}={}){
   for(let y=12;y<52;y++)for(let x=12;x<52;x++)confidence[y*width+x]=245;
   const matte={width,height,confidence,source:'apple-pem'},gray=new Uint8Array(width*height).fill(150);
   const context={Uint8Array,console:{warn(){}},navigator:{gpu:{}},crossOriginIsolated:true,
-    depthModel,shapeAiDisparity,AI_DISPARITY_MAX,fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,fusePortraitDepth,
+    depthModel,shapeAiDisparity,AI_DISPARITY_MAX,fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte,fusePortraitDepth,describePortraitScene,
     discoverHeic:()=>({props:{},primary:1}),dimensionsForItem:()=>[width,height],
     inferenceGeometry:()=>({width,height}),itemOrientation:()=>({angle:0,mirror:null}),
     storedPointToDisplay:(x,y)=>({x,y}),depthInputBudgets:()=>[64],
@@ -74,6 +75,8 @@ test('Standard and Pro use identical foreground stages and select only a differe
   }
   assert.deepEqual(outputs[0].gray,outputs[1].gray);
   assert.deepEqual(structuredClone(outputs[0].foregroundReport),structuredClone(outputs[1].foregroundReport));
+  assert.equal(outputs[0].sceneProfile.version,1);
+  assert.deepEqual(structuredClone(outputs[0].sceneProfile),structuredClone(outputs[1].sceneProfile),'scene calibration cannot branch on model tier');
 });
 
 test('without foreground guidance, optional failure returns generated depth without guessing a subject',async()=>{

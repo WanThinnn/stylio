@@ -6995,3 +6995,161 @@ and Style MakerNote 0x54. Styles/Texture/HDR production modules are unchanged.
 Private photos, outputs and inference arrays remain outside tracked files.
 The user requests cleanup and a commit directly on master; no push or production
 deployment is requested in this step. Development cache is v241.
+
+## 10.174 — Reported depth regressions after 1.1.0 (2026-10-21)
+
+Reported fixtures are under the user's private depth-error/error and
+depth-error/error-unmodified folders and remain untracked. On exact Standard
+inference, IMG_2862 produces only 1,701 confident IS-Net pixels split across 46
+components; its largest component is 591/786,432 pixels. The v2 fusion had
+treated this fragmented foliage/flower saliency as one subject and changed
+40,673 depth pixels. IMG_2694 produces a 106,547-pixel dominant generated
+component entering from the image edge; the old path focused a foreground
+seat/region rather than the central bus subject and changed 117,484 depth
+pixels. These are semantic-guidance/autofocus failures, not evidence that the
+monocular depth model itself reversed near/far order.
+
+Generated-only foreground guidance now requires one substantial, dominant,
+interior component. Fragmented, ambiguous or edge-entering saliency fails
+closed to the unmodified model depth and centre focus. Genuine Apple PEM/skin
+guidance keeps the accepted v2 Apple-anchored path. Portable selection and
+orchestration regressions pass; replay on IMG_2862 reports `fragmented`, and
+IMG_2694 reports `border-ambiguous`, both with zero matte-conditioned depth
+changes. Physical Photos rendering of the two candidate exports is pending.
+
+Generated/non-native Portrait assembly now adds the device-isolated 0x20 viewer
+toggle bit to the template's existing valid 0x19 scalar. This addresses the
+reported state where Edit exposes aperture but the viewer omits the f badge.
+The earlier N1 evidence proves the bit on the modern native graph; extending it
+to the generated template graph is covered structurally and has explicit
+IMG_6215/IMG_9188 phone candidates, but its non-native device result is pending.
+
+The reported Indigo JPEG parses as valid RGB Adaptive HDR in both the copied and
+unmodified forms (3024x4032 base, 1512x2016 RGB gain map, headroom 3.83289).
+Both complete desktop imports pass, so the generic rejection was downstream of
+format discovery. HDR import now falls back to the existing deterministic
+FFmpeg JPEG decoder when Safari rejects both ImageBitmap and HTMLImageElement
+for the extracted MPF base. A forced dual-browser-decoder-failure E2E passes,
+retaining the full dimensions, 48 HDR tiles, generated Styles graph and exact
+3.83289 capacity. Focused HDR/raster tests: 34 pass. Focused Portrait/export/
+orchestration tests: 73 pass. A wildcard test attempt was stopped because it
+also launches diagnostic CLI scripts that require absent noSmartStyle inputs;
+their ENOENT failures are unrelated to these changes.
+
+Temporary LAN phone page is http://192.168.1.3:8781/ with six allowlisted HEIC
+candidates; local HEAD checks return 200 with exact lengths. It automatically
+stops at 15:49 Asia/Bangkok on 2026-10-21. The f/16 response change is not yet
+production policy: IMG_1880 baseline and a lower-range candidate, plus a lower
+range IMG_6215 candidate, are provided for physical comparison before replacing
+the previously accepted K2 calibration globally. No commit, push or deployment.
+
+## 10.175 — Phone rejects first depth trial; rebuild from unmodified sources (2026-10-21)
+
+Phone feedback supersedes the provisional conclusions in 10.174: the lower
+IMG_1880 response is accepted at f/16, but removing generated matte guidance alone
+does not visibly solve IMG_2862/IMG_2694; IMG_2862 remains far too blurred at f/16.
+Patching the Photos/Stylio outputs of IMG_6215/IMG_9188 is an invalid test of the
+fresh-original export: it exposes the viewing icon but loses Edit aperture.
+Fresh-original app processing still has Edit aperture but no viewer icon.
+
+Actual unmodified IMG_6215_Original.JPG and IMG_9188.JPG are both iPhone 7 and
+have MakerNote 0x19=0, 0x1f=0. Their Photos/Stylio copies have already changed
+flags. More importantly, makerBlob() returns nativePortraitMaker(sourceExif)
+early for older full camera MakerNotes and skipped the viewerDepth mutation.
+The proposed template-only change in 10.174 therefore never touched this branch;
+the template already contains 0x20. The redundant template mutation is removed.
+The legacy full-camera branch now opts into viewerDepth, retaining the actual
+source flags. A real legacy-camera assembly test first fails (0x2002 instead of
+0x2022), then passes for iPhone 7/11/14 after the correction.
+
+Production generated export now selects projection-v2: one fifth of the former
+bounded artistic response, matching accepted IMG_1880 .75 -> .15. It also scales
+the unknown-optics fallback by .2. projection-v1 is retained only as an explicit
+historical replay policy; the accepted old N1 replay remains exact. Real native
+camera depth restoration still preserves its original range. Lower response on
+other scenes is pending physical comparison, not established metric calibration.
+
+Seven files are freshly built from unmodified inputs, not saved Stylio/Photos
+outputs. JPGs use importRaster -> real Portrait controller, HEICs use preserved
+native Styles + Texture -> real inference/export. All start at f/16:
+- IMG_6215: flags 0x19=0x20, 0x1f=1, range 0..1.0156432258838104.
+- IMG_9188: flags 0x19=0x20, 0x1f=1, range 0..3.624402634014297.
+- IMG_1880: Standard, range 0..0.15000000000000002.
+- IMG_2862: Standard and Pro, same range 0..0.15000000000000002.
+- IMG_2694: Standard and Pro, same range 0..4.800000000000001.
+The two models use identical foreground policy; only depth inference differs.
+Their physical near/far rendering remains pending.
+
+User reports Safari reload specifically on ordinary HEIC + only Portrait,
+Standard, with parallel enabled. Two isolated iframe realms avoid singleton
+worker interference but double peak model/codec allocations. Exact iPhone
+process termination cannot be measured on this Windows host; memory pressure
+is a plausible cause, not a proven crash-log diagnosis. As a containment fix,
+iOS/iPadOS and Safari now enforce one processing lane even if saved parallel is
+on; Settings disables its switch with localized explanation. Desktop non-Safari
+retains two lanes. Integration test first reproduces both starts on iOS, then
+passes with one runtime after the scheduling guard. This serializes these
+clients; it does not claim concurrent Safari processing has been repaired.
+
+Verification: 78 export/geometry/application/preferences tests, 82 Portrait/HDR/
+lifecycle tests, and 33 startup/module-path/stylesheets tests pass (193 total).
+i18n/PWA/diff checks pass. All seven real browser exports complete. Temporary
+allowlisted LAN page http://192.168.1.3:8782/ expires at 16:13:58 Asia/Bangkok on
+2026-10-21; full downloads all return 200 and SHA256-match the source files.
+Private fixtures, screenshots, diagnostic scripts and candidates remain outside
+tracked assets. Development cache is v243. No commit, push or deployment.
+
+## 10.176 — Scene response replaces the global blur reduction (2026-10-21)
+
+Latest phone feedback accepts fresh-original IMG_6215/IMG_9188: viewer f and
+Edit aperture both work, without excessive blur. IMG_1880 lower response is
+accepted. IMG_2862 Pro has preferred strength at f/1.4, while Standard is far
+too blurred; IMG_2694 remains nearly f/16-like at f/1.4. The user explicitly
+prioritizes blur; Indigo's remaining Safari transfer failure is deferred, not
+resolved by the desktop HDR fallback test.
+
+Encoded luma readback shows IMG_2862 background-median differences of 100/255
+(Standard) and 47/255 (Pro), despite V2 using identical ranges. IMG_2694 focus
+is near the far end: only 1.9%/1.6% background support and about 97% foreground.
+Its foreground median is 112/255 or 99/255. The actual iPhone 7 EXIF pair also
+shows 53mm equivalent already includes 1.885x digital crop over 28mm; applying
+zoom again double-counted that crop in the estimated projection.
+
+Generated export now uses scene-v3. A per-capture profile measures initial
+focus, local noise, robust span, separated populations, and accepted subject
+confidence. It selects supported background or foreground separation and
+compensates the arbitrary depth scale and optical projection. There are no
+filename/device/model-tier response coefficients. Flat/outlier scenes and
+unknown optics use a reported V2 fallback. The profile stays fixed through
+refocus/aperture changes; source camera-depth restoration is unchanged.
+
+This remains empirical effect calibration, not metric depth or recovered Apple
+renderer math: the global .335 complex-scene target and confidence blend toward
+1 are anchored to preferred Pro/isolated-subject trials. Foreground .35 is an
+explicit preview policy. Equal median responses do not prove physical blur
+accuracy across every scene. The limitations and derivation are documented in
+docs/web/2026-10-21-scene-portrait-response.md.
+
+Preview uses canonical scene scale rather than encoded optical units and an
+inverse-aperture response, with f/16 nonzero and Off separate. A real WebGL
+readback test first reproduces the old pre-saturated curve's failure under
+affine-equivalent depth (max pixel deviations 14 background, 127 foreground).
+The linear disparity-difference fix then gives zero deviation in both tests.
+This is a synthetic GPU response test, not a Photos rendering test.
+
+Seven new V3 exports are built from unmodified inputs via real inference and
+assembly. HEVC luma readback and image/depth-payload hashes pass for every file.
+Measured response versus V2: 2862 Standard .471x, Pro 1.002x; 2694 Standard
+4.929x, Pro 5.576x; 1880 .959x; 6215 1.901x; 9188 1.145x. These ratios describe
+the calibrated statistic, not measured native Photos blur radius. Both tiers
+now share the intended median response on each problem fixture. The increased
+6215 response specifically needs a regression check despite its accepted V2
+appearance. Viewer/edit metadata remains on the accepted fixed path.
+
+Verification: 103 Portrait/export/scene tests and 77 depth/matte/lifecycle/PWA
+module/UI tests pass; 12 application tests also pass. Real GPU readback passes;
+PWA/i18n/diff checks pass. Cache v244 includes the new scene module. The private
+allowlisted LAN page http://192.168.1.3:8783/ expires at 16:47:05 Asia/Bangkok on
+2026-10-21. Every full LAN download returns 200 and SHA256-matches its source;
+unknown names return 404. Photos f/1.4/f/16, refocus, save/reopen, and viewer/Edit
+regression verification on the V3 candidates is pending. No commit/push/deploy.
