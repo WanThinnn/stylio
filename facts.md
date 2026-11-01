@@ -7498,3 +7498,63 @@ two outputs,peak1 AI worker/model transfer and one fetch per Portrait weight.
 Release1.1.0 synchronization,PWA and diff checks pass. Card CSS matches its
 original pre-v255 content. No private photos,generated screenshots/reports or
 assembled local weights are staged. Approved destination:origin/master.
+
+### 10.189 Square Portrait report: incomplete generated calibration without optics (2026-11-01)
+
+The supplied IMG_3059.JPG is a metadata-poor 1200x1200 JPEG with no usable camera
+optics. Its processed IMG_3086.HEIC has a 1200x1200 primary and 1024x1024 depth,
+matching irot=270, high Quality, relative Accuracy, a valid matching auxC/XMP
+disparity range 0..0.6000000000000001, v7 REND, aperture 4.5 and Lighting strength
+0.5. The user reports a viewer f icon but no aperture or Portrait Lighting in
+Edit; Styles and Texture work. These controls remain separate acceptance checks.
+
+File inspection identifies a partial calibration: the generated builder emits
+an intrinsic matrix, lens/extrinsic fields and reference dimensions but deletes
+PixelSize when EXIF cannot estimate it. This affects metadata-poor rectangular
+photos too; the supplied case does not prove that square aspect ratio itself is
+the eligibility gate. Missing PixelSize is a leading explanation, not yet an
+on-device isolated cause. Apple documents calibration's role in rendering, but
+does not specify Photos' private edit-control eligibility rules:
+https://developer.apple.com/documentation/avfoundation/avdepthdata/cameracalibrationdata
+
+Local correction: generated depth without a usable positive optical pixel size
+keeps the complete historical reference editing calibration, explicitly reported
+as reference-generated-depth-fallback / referenceCalibration=true. This is a
+compatibility profile, not this photo's measured optics or metric AI depth.
+Generated sources with complete EXIF estimates retain their per-photo virtual
+projection and zero distortion. Native depth calibration/restoration is unchanged.
+Generated exports now reject incomplete optical records instead of reporting
+success. Source ranges, samples, HDR capacity, aperture and lighting fields still
+follow the existing builders. No aspect-ratio-only switch or camera identity is
+introduced. Shell cache v257 refreshes the changed module.
+
+A real buildAiPortrait regression first failed on the missing PixelSize and now
+passes for square, landscape and portrait sources. A separate complete-optics
+fixture protects source-derived square/rectangular projections; malformed fallback
+profiles must throw. Native calibration, J4/N1 resources, HDR, selected Styles,
+Texture, orientation and native/non-native preservation remain regression guards.
+Related validation: 180 pass, 14 missing-private-fixture skips, zero failures;
+module/release checks: three pass. PWA consistency and git diff --check pass.
+
+Private square-portrait-replay.mjs removes only old depth/focus metadata from the
+reported output, then calls the real builder with the exact encoded depth/range
+and original f4.5/focus. It produces IMG_3086_PortraitFix.HEIC (2,368,107 bytes;
+SHA256 030fdf90ee9a94c44040ffbd836bf8c2dedafd3aa13fb6d44d4652880443baf3).
+All photographic, HDR, Styles, Texture, matte and depth payloads are byte-exact;
+auxC and disparity range match. The profile may change the rendered blur response:
+actual viewer toggle, Edit aperture/Lighting and before/after Save behavior still
+require iPhone validation. Local file tests cannot prove this UI repair. No
+commit, push or deployment is implied.
+
+Device feedback for IMG_3086_PortraitFix: the user explicitly confirms that both
+aperture F and Portrait Lighting can be adjusted inside Photos Edit. This accepts
+the combined fallback calibration for the supplied JPEG-derived square case;
+it does not isolate PixelSize alone, nor confirm viewer-toggle behavior or
+save/reopen persistence. The user also reports the same original symptom on
+square original iPhone HEICs. No such source/output pair has been supplied yet:
+the missing-optics JPEG fix is not evidence that complete-optics native HEICs
+are repaired. Keep the source-derived and native-depth paths unchanged until
+that case can be inspected and reproduced separately.
+The local private-fixture inventory inspected 84 HEICs with native/original/org
+names and found no square primary, so it cannot substitute for the reported
+square iPhone source/output pair.

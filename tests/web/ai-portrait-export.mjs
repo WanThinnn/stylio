@@ -12,7 +12,7 @@ import {extractAppleMakerNoteTag,injectAppleMakerNoteTag,exifCameraModel,getMake
 import {parseBplist,buildBplist,BplistReal} from '../../web/src/core/bplist.js';
 import {rebuildHeic} from '../../web/src/styles/graft.js';
 import {topBox,concat,be,box} from '../../web/src/core/box.js';
-import {buildAppleStyleExif} from '../../web/src/raster/exif.js';
+import {buildAppleStyleExif,preserveRasterExif} from '../../web/src/raster/exif.js';
 import {styleCapabilities} from '../../web/src/styles/style-capabilities.js';
 import {photoContentIdentifier} from '../../web/src/media/live-photo.js';
 import {patch} from '../../web/src/styles/port.js';
@@ -59,9 +59,48 @@ function photo(width,height,name='48-12'){
 }
 const depth={payload:assets.mask.payload,hvcc:assets.mask.hvcc,width:64,height:64};
 
+test('Portrait without source optics retains a complete editing calibration on square and rectangular photos',()=>{
+  for(const [w,h]of [[1200,1200],[900,600],[600,900]]){
+    const source=photo(w,h),output=buildAiPortrait(source,depth,template),d=discoverHeic(output.data);
+    const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
+    const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+    const xmp=new TextDecoder().decode(extractItemData(output.data,d,side));
+    assert.match(xmp,/<depthData:PixelSize>[\d.eE+-]+<\/depthData:PixelSize>/,
+      'IMG_3059 / IMG_3086 pattern: generated calibration must not lose its pixel-size field');
+    assert.equal(output.report.geometry,'reference-generated-depth-fallback');
+    assert.equal(output.report.referenceCalibration,true);
+    for(const field of ['IntrinsicMatrix','IntrinsicMatrixReferenceWidth','IntrinsicMatrixReferenceHeight',
+      'PixelSize','LensDistortionCoefficients','InverseLensDistortionCoefficients','ExtrinsicMatrix',
+      'LensDistortionCenterOffsetX','LensDistortionCenterOffsetY']){
+      const block=new RegExp('<depthData:'+field+'>[\\s\\S]*?</depthData:'+field+'>');
+      assert.equal(xmp.match(block)?.[0],template.depthXmp.match(block)?.[0],field+' belongs to the explicit compatibility profile');
+    }
+    assert.match(xmp,/<depthData:Accuracy>relative<\/depthData:Accuracy>/);
+    assert.match(xmp,/<depthData:Quality>high<\/depthData:Quality>/);
+    assert.match(xmp,/<depthBlurEffect:SimulatedAperture>4.500000<\/depthBlurEffect:SimulatedAperture>/);
+    assert.match(xmp,/<portraitLightingEffect:EffectStrength>0.5<\/portraitLightingEffect:EffectStrength>/);
+    assert.deepEqual(extractItemData(output.data,d,id),depth.payload);
+  }
+});
+
+test('an incomplete fallback calibration fails instead of publishing a successful Portrait export',()=>{
+  const incomplete={...template,depthXmp:template.depthXmp.replace(/<depthData:PixelSize>[^<]*<\/depthData:PixelSize>/,'')};
+  assert.throws(()=>buildAiPortrait(photo(1200,1200),depth,incomplete),/Incomplete generated Portrait calibration/);
+});
+
 test('AI Portrait geometry follows its stored source grid instead of the reference camera lens',()=>{
   for(const [iw,ih]of [[900,600],[3024,4032],[1200,1200]]){
-    const source=photo(iw,ih),before=discoverHeic(source),[w,h]=dimensionsForItem(before.props,before.primary);
+    // Independent camera optics: 7 mm focal length, 24 mm equivalent. Unlike
+    // metadata-free downloads, this source supports a complete estimated grid.
+    const base=photo(iw,ih),bd=discoverHeic(base);
+    const entry=(tag,type,value)=>concat([be(tag,2),be(type,2),be(1,4),value]);
+    const optics=concat([be(6,4),new TextEncoder().encode('Exif\0\0MM'),be(42,2),be(8,4),be(1,2),
+      entry(0x8769,4,be(26,4)),be(0,4),be(2,2),entry(0x920a,5,be(56,4)),
+      entry(0xa405,3,concat([be(24,2),be(0,2)])),be(0,4),be(7,4),be(1,4)]);
+    const exif=preserveRasterExif(optics,extractItemData(base,bd,bd.exifItem),{width:iw,height:ih,orientation:6});
+    const ft=topBox(base,'ftyp'),source=rebuildHeic(base,bd,base.slice(ft.off,ft.off+ft.size),
+      base.slice(bd.meta.off,bd.meta.off+bd.meta.size),new Map([[bd.exifItem,exif]]));
+    const before=discoverHeic(source),[w,h]=dimensionsForItem(before.props,before.primary);
     const output=buildAiPortrait(source,depth,template),d=discoverHeic(output.data);
     const id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
     const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
@@ -75,7 +114,10 @@ test('AI Portrait geometry follows its stored source grid instead of the referen
     assert.equal(matrix[6],(w-1)/2);assert.equal(matrix[7],(h-1)/2);
     assert.match(xmp,/<depthData:Quality>high<\/depthData:Quality>/,'keep the device-accepted Photos aperture eligibility declaration');
     assert.equal(output.report.referenceCalibration,false);
-    assert.equal(output.report.geometry,'relative-image-grid');
+    assert.equal(output.report.geometry,'exif-35mm-estimate');
+    const focal=Math.hypot(w,h)*24/Math.hypot(36,24);
+    assert.ok(Math.abs(matrix[0]-focal)<1e-9);
+    assert.match(xmp,/<depthData:PixelSize>/);
   }
 });
 

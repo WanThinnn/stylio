@@ -116,21 +116,30 @@ export function portraitDepthMetadata(source,d,depth,template,aperture){
   }else{
     const [w,h]=dimensionsForItem(d.props,d.primary),exif=extractItemData(source,d,d.exifItem);
     const p=portraitProjection(w,h,readPortraitOptics(exif));geometry=p.geometry;
-    xmp=scalar(xmp,'depthData:IntrinsicMatrixReferenceWidth',w);
-    xmp=scalar(xmp,'depthData:IntrinsicMatrixReferenceHeight',h);
-    xmp=sequence(xmp,'depthData:IntrinsicMatrix',[p.fx,0,0,0,p.fy,0,p.cx,p.cy,1]);
-    // This is a virtual camera co-located with the decoded RGB grid. Applying
-    // another capture's lens warp would misregister the computed AI edges.
-    xmp=sequence(xmp,'depthData:LensDistortionCoefficients',Array(8).fill(0));
-    xmp=sequence(xmp,'depthData:InverseLensDistortionCoefficients',Array(8).fill(0));
-    xmp=sequence(xmp,'depthData:ExtrinsicMatrix',[1,0,0,0,1,0,0,0,1,0,0,0]);
-    xmp=scalar(xmp,'depthData:LensDistortionCenterOffsetX',p.cx);
-    xmp=scalar(xmp,'depthData:LensDistortionCenterOffsetY',p.cy);
+    if(p.pixelSize===null){
+      // JPEGs/crops without usable optics cannot supply a complete estimated
+      // calibration. Removing PixelSize leaves a partial optical record (the
+      // reported square IMG_3086 has this shape). Keep the complete historical
+      // editing profile, as for uncalibrated native depth above, and report its
+      // origin explicitly. It is not measured calibration for this photograph.
+      geometry='reference-generated-depth-fallback';referenceCalibration=true;
+    }else{
+      xmp=scalar(xmp,'depthData:IntrinsicMatrixReferenceWidth',w);
+      xmp=scalar(xmp,'depthData:IntrinsicMatrixReferenceHeight',h);
+      xmp=sequence(xmp,'depthData:IntrinsicMatrix',[p.fx,0,0,0,p.fy,0,p.cx,p.cy,1]);
+      // This is a virtual camera co-located with the decoded RGB grid. Applying
+      // another capture's lens warp would misregister the computed AI edges.
+      xmp=sequence(xmp,'depthData:LensDistortionCoefficients',Array(8).fill(0));
+      xmp=sequence(xmp,'depthData:InverseLensDistortionCoefficients',Array(8).fill(0));
+      xmp=sequence(xmp,'depthData:ExtrinsicMatrix',[1,0,0,0,1,0,0,0,1,0,0,0]);
+      xmp=scalar(xmp,'depthData:LensDistortionCenterOffsetX',p.cx);
+      xmp=scalar(xmp,'depthData:LensDistortionCenterOffsetY',p.cy);
+      xmp=scalar(xmp,'depthData:PixelSize',p.pixelSize);
+    }
+    if(!completeNativeOptics(xmp))throw Error('Incomplete generated Portrait calibration');
     xmp=scalar(xmp,'depthData:Accuracy','relative');
-    // Preserve the profile's editing-eligibility declaration. On-device J1/J4
-    // isolate low -> high as the aperture-control gate on these captures.
-    // This is not model confidence or a claim of metric camera accuracy.
-    xmp=p.pixelSize===null?xmp.replace(/\s*<depthData:PixelSize>[^<]*<\/depthData:PixelSize>/,''):scalar(xmp,'depthData:PixelSize',p.pixelSize);
+    // Keep the profile's device-accepted high Quality declaration (J1/J4).
+    // It is editing eligibility, not inferred certainty or metric accuracy.
     xmp=scalar(xmp,'apdi:FloatMinValue',depth.floatMin??0);
     xmp=scalar(xmp,'apdi:FloatMaxValue',depth.floatMax??1);
     xmp=scalar(xmp,'depthBlurEffect:SimulatedAperture',aperture.toFixed(6));
