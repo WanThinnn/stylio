@@ -33,8 +33,16 @@ test('bounded optics reader handles both TIFF orders and declines truncated or i
 test('relative blur normalization is resolution invariant, bounded and explicit when optics are missing',()=>{
   const profile=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
   const optics={focalMm:6.765,equivalentMm:24};
-  const a=relativePortraitResponse(4000,3000,optics,profile,3),b=relativePortraitResponse(8000,6000,optics,profile,3);
-  assert.equal(a.disparityMax,b.disparityMax);assert.equal(a.blurResponse,'projection-v2');
+  const commonRatios=[[1200,1200],[2000,3000],[3000,2000],[2400,3000],[3000,2400],
+    [3024,4032],[4032,3024],[2160,3840],[3840,2160]];
+  for(const [width,height]of commonRatios){
+    const a=relativePortraitResponse(width,height,optics,profile,3),b=relativePortraitResponse(width*2,height*2,optics,profile,3);
+    assert.ok(Math.abs(a.disparityMax-b.disparityMax)<1e-12);assert.equal(a.blurResponse,'projection-v2');
+    const p=portraitProjection(width,height,optics);
+    assert.ok([p.fx,p.fy,p.pixelSize].every(n=>Number.isFinite(n)&&n>0));
+    assert.equal(p.cx,(width-1)/2);assert.equal(p.cy,(height-1)/2);
+  }
+  const a=relativePortraitResponse(4000,3000,optics,profile,3);
   assert.deepEqual(relativePortraitResponse(4000,3000,null,profile,3),{disparityMax:3*.2,blurResponse:'relative-unscaled',blurResponseLimited:false});
   const wide=relativePortraitResponse(4000,3000,{focalMm:1,equivalentMm:10},profile,3);
   assert.equal(wide.disparityMax,24*.2);assert.equal(wide.blurResponseLimited,true);

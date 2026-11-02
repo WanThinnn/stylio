@@ -188,8 +188,9 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
       const textureOnly=unknownAppleContract?false:preserveNativeStyles(bytes,d);
       const nativeTexture=unknownAppleContract?false:nativeTextureCapture(bytes,d);
       // Proven iPhone 16/17 "Current" exports keep the user's six-key Style
-      // selection + ISO HDR but omit the standalone Styles graph. They are the
-      // only incomplete non-Portrait shape allowed into reconstruction.
+      // selection + ISO HDR but omit the standalone Styles graph. Other
+      // incomplete non-Portrait exports remain preserved; eight-key camera
+      // reconstruction was rejected on-device for IMG_3101.
       const editedStyleExportCandidate=unknownAppleContract?false:nativeStyleExportTextureCandidate(bytes,d);
       let portraitState=null;
       if(!unknownAppleContract){

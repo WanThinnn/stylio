@@ -31,7 +31,12 @@ test('signatures distinguish HEIC and AVIF regardless of file extension', () => 
 });
 
 test('portrait, landscape, small, high-resolution and panorama geometry fits every grid', () => {
-  for (const [width,height] of [[900,600],[600,900],[7,5],[8000,6000],[48000,600],[600,48000]]) {
+  // Geometry coverage only: these ratios do not establish Photos editor support.
+  const commonRatios=[[1200,1200],[2000,3000],[3000,2000],[2400,3000],[3000,2400],
+    [3024,4032],[4032,3024],[2160,3840],[3840,2160]];
+  const sizes=[...commonRatios.flatMap(([w,h])=>[[w,h],[w*2,h*2]]),
+    [900,600],[600,900],[4284,4284],[7,5],[8000,6000],[48000,600],[600,48000]];
+  for (const [width,height] of sizes) {
     const g = targetGeometry({width,height});
     assert.ok(g.primaryTiles <= 48);
     assert.ok(g.hdrColumns*g.hdrRows <= 12);

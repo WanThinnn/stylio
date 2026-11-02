@@ -27,6 +27,23 @@ test('scene optics compensation has no telephoto floor or ultrawide ceiling',()=
  assert.ok(Math.abs(projected(tele,r1)-projected(wide,r2))<1e-8);
  assert.equal(r1.blurResponseLimited,false);assert.equal(r2.blurResponseLimited,false);
 });
+
+test('generated reference calibration uses scene separation when source optics are missing',()=>{
+ const a=describePortraitScene(scene(),w,h),b=describePortraitScene(scene(2,10),w,h);
+ for(const [width,height]of [[1200,1200],[2400,2400],[1600,1200]]){
+  const ra=relativePortraitResponse(width,height,null,profile,3,'scene-v3',a);
+  const rb=relativePortraitResponse(width,height,null,profile,3,'scene-v3',b);
+  assert.equal(ra.sceneResponseApplied,true,'missing EXIF must not discard usable scene separation');
+  assert.equal(ra.responseCalibration,'reference-profile');
+  assert.ok(Math.abs(ra.disparityMax*a.separation-a.targetResponse)<1e-9);
+  assert.ok(Math.abs(rb.disparityMax*b.separation-b.targetResponse)<1e-9);
+  assert.equal(ra.previewDisparityMax,ra.disparityMax,'reference-calibrated export and preview use the same range');
+ }
+ const flat=describePortraitScene(new Uint8Array(w*h).fill(100),w,h);
+ const fallback=relativePortraitResponse(1200,1200,null,profile,3,'scene-v3',flat);
+ assert.equal(fallback.sceneResponseApplied,false);
+ assert.equal(fallback.disparityMax,3*.2,'unusable scene keeps its existing bounded response');
+});
 test('focus at the far end uses measured foreground separation instead of an absent background',()=>{
  const gray=new Uint8Array(w*h).fill(160);
  for(let y=24;y<36;y++)for(let x=34;x<46;x++)gray[y*w+x]=45;

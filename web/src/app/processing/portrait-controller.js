@@ -6,16 +6,22 @@ import {releaseHeicProcessor} from '../../media/heic-processing.js';
 import {photoCaptureDate} from '../../media/photo-date.js';
 import {createPortraitProgress} from './portrait-progress.js';
 export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcceleration,selectedAiLevel,lane=0,acquireProcessingSlot}){
+  function skippedNotice(ui,reason){
+    ui.aiState('');
+    if(reason==='missing-native-styles')ui.note(aiText().missingNativeStyles,'compatibility');
+    else if(reason==='unverified-styles')ui.note(aiText().compatibility,'compatibility');
+    else ui.note(aiText().skip,'ai');
+  }
   // Keep the normal result for toggle-off/cancellation. Only opt-in adds Portrait.
   async function tryAiPortrait(source, outputFile, ui, name, sourceFile = null, preserveIncomplete = false) {
     const {portraitEligibility} = await import('../../portrait/ai-portrait-container.js');
     const candidate = {outputFile, sourceFile, ui, name, state: 'new',lane,
-      skip: preserveIncomplete ? 'unverified-styles' : source ? portraitEligibility(source) : null};
+      skip: preserveIncomplete ? 'missing-native-styles' : source ? portraitEligibility(source) : null};
     aiCandidates.push(candidate);
     candidate.run=()=>runAiCandidate(candidate);
     if (aiFeatures.enabled('portrait')&&!candidate.skip) await runAiCandidate(candidate);
     else {
-      if(candidate.skip){candidate.state='skipped';ui.aiState('');ui.note(candidate.skip==='unverified-styles'?aiText().compatibility:aiText().skip,candidate.skip==='unverified-styles'?'compatibility':'ai');}
+      if(candidate.skip){candidate.state='skipped';skippedNotice(ui,candidate.skip);}
       ui.output(outputFile);ui.progress?.(100);ui.aiBusy(false);
     }
   }
@@ -23,7 +29,7 @@ export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcce
   async function runAiCandidate(candidate) {
     if (!aiFeatures.enabled('portrait') || !['new', 'failed'].includes(candidate.state)) return;
     const {ui, name, sourceFile} = candidate;
-    if (candidate.skip) { candidate.state = 'skipped'; ui.aiState('');ui.note(candidate.skip==='unverified-styles'?aiText().compatibility:aiText().skip,candidate.skip==='unverified-styles'?'compatibility':'ai');ui.progress?.(100);ui.aiBusy(false); return; }
+    if (candidate.skip) { candidate.state = 'skipped'; skippedNotice(ui,candidate.skip);ui.progress?.(100);ui.aiBusy(false); return; }
     candidate.state = 'running';
     const modelId=selectedAiLevel(),progress=createPortraitProgress(ui,aiText,modelId);progress.start();
     ui.note('', 'ai-error');

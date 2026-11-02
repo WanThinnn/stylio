@@ -88,6 +88,27 @@ test('an incomplete fallback calibration fails instead of publishing a successfu
   assert.throws(()=>buildAiPortrait(photo(1200,1200),depth,incomplete),/Incomplete generated Portrait calibration/);
 });
 
+test('unknown-optics square export keeps its measured scene response consistent in auxC, XMP and preview',()=>{
+  const source=photo(1200,1200),gray=new Uint8Array(depth.width*depth.height).fill(90);
+  for(let y=20;y<44;y++)for(let x=20;x<44;x++)gray[y*depth.width+x]=160;
+  const sceneProfile=describePortraitScene(gray,depth.width,depth.height);
+  const calibrated={...depth,floatMax:3,relativeResponse:'scene-v3',sceneProfile};
+  const a=buildAiPortrait(source,calibrated,template,{aperture:1.4});
+  const b=buildAiPortrait(source,calibrated,template,{aperture:16,focusX:.2,focusY:.7});
+  assert.equal(a.report.referenceCalibration,true);assert.equal(a.report.responseCalibration,'reference-profile');
+  assert.equal(a.report.sceneResponseApplied,true);
+  assert.ok(Math.abs(a.report.disparityMax*sceneProfile.separation-sceneProfile.targetResponse)<1e-9);
+  assert.equal(a.report.previewDisparityMax,a.report.disparityMax);
+  assert.equal(a.report.disparityMax,b.report.disparityMax,'refocus/aperture cannot recalibrate the scene');
+  for(const output of [a,b]){
+    const d=discoverHeic(output.data),id=[...d.infos.keys()].find(id=>auxUriForItem(d.props,id)===DEPTH_URI);
+    const side=d.refs.find(r=>r.type==='cdsc'&&r.to.includes(id)).from;
+    assert.equal(readAppleDepthRange(new TextDecoder().decode(extractItemData(output.data,d,side))).floatMax,a.report.disparityMax);
+    assert.deepEqual(propertyBoxBytes(output.data,d.props,id,'auxC'),appleDepthAuxc({floatMax:a.report.disparityMax}));
+    assert.deepEqual(extractItemData(output.data,d,id),depth.payload);
+  }
+});
+
 test('AI Portrait geometry follows its stored source grid instead of the reference camera lens',()=>{
   for(const [iw,ih]of [[900,600],[3024,4032],[1200,1200]]){
     // Independent camera optics: 7 mm focal length, 24 mm equivalent. Unlike

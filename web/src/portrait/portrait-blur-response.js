@@ -1,6 +1,17 @@
 import {dimensionsForItem,extractItemData} from '../raster/heif.js';
 import {portraitProjection,readPortraitOptics} from './portrait-geometry.js';
 
+function sceneResponse(base,scene,ratio){
+  if(!Number.isFinite(scene.separation)||scene.separation<=0||scene.separation>1
+    ||!Number.isFinite(scene.targetResponse)||scene.targetResponse<=0||scene.targetResponse>1
+    ||!['background','foreground'].includes(scene.side))throw Error('Invalid Portrait scene calibration');
+  const previewDisparityMax=base/3*scene.targetResponse/scene.separation,disparityMax=ratio*previewDisparityMax;
+  if(!Number.isFinite(disparityMax)||disparityMax<=0||disparityMax>2**30)throw Error('Portrait scene response exceeds representation');
+  return {disparityMax,previewDisparityMax,blurResponse:'scene-v3',blurResponseLimited:false,
+    sceneResponseApplied:true,sceneSide:scene.side,sceneSeparation:scene.separation,
+    sceneTarget:scene.targetResponse,subjectConfidence:scene.subjectConfidence};
+}
+
 // The initial K2 response over-blurred multiple scenes even at f/16. The phone
 // trial on IMG_1880 accepts one fifth of that response (.75 -> .15). Apply the
 // same correction to generated depth only; v1 remains an explicit historical
@@ -14,8 +25,11 @@ export function relativePortraitResponse(width,height,optics,template,base,polic
   const responseScale=policy==='projection-v2'?.2:1;
   const p=portraitProjection(width,height,optics);
   if(p.pixelSize===null){
-    if(policy==='scene-v3')return {...relativePortraitResponse(width,height,optics,template,base,'projection-v2'),
-      blurResponse:policy,sceneResponseApplied:false,sceneResponseReason:'unknown-optics'};
+    // The generated metadata builder uses the complete reference editing
+    // calibration here. Its response ratio to itself is one; no physical source
+    // optics are invented. Keep the measured separation instead of weakening
+    // every unknown-optics scene to the old fixed .6 disparity range.
+    if(policy==='scene-v3')return {...sceneResponse(base,scene,1),responseCalibration:'reference-profile'};
     return {disparityMax:base*responseScale,blurResponse:'relative-unscaled',blurResponseLimited:false};
   }
   const scalar=k=>Number(new RegExp('<depthData:'+k+'>([^<]+)<').exec(template.depthXmp)?.[1]);
@@ -27,14 +41,7 @@ export function relativePortraitResponse(width,height,optics,template,base,polic
   const ratio=reference/actual;
   if(!Number.isFinite(ratio)||ratio<=0)throw Error('Invalid Portrait response profile');
   if(policy==='scene-v3'){
-    if(!Number.isFinite(scene.separation)||scene.separation<=0||scene.separation>1
-      ||!Number.isFinite(scene.targetResponse)||scene.targetResponse<=0||scene.targetResponse>1
-      ||!['background','foreground'].includes(scene.side))throw Error('Invalid Portrait scene calibration');
-    const previewDisparityMax=base/3*scene.targetResponse/scene.separation,disparityMax=ratio*previewDisparityMax;
-    if(!Number.isFinite(disparityMax)||disparityMax<=0||disparityMax>2**30)throw Error('Portrait scene response exceeds representation');
-    return {disparityMax,previewDisparityMax,blurResponse:policy,blurResponseLimited:false,
-      sceneResponseApplied:true,sceneSide:scene.side,sceneSeparation:scene.separation,
-      sceneTarget:scene.targetResponse,subjectConfidence:scene.subjectConfidence};
+    return sceneResponse(base,scene,ratio);
   }
   const proposed=base*2*ratio,bounded=Math.max(.75,Math.min(24,proposed));
   return {disparityMax:bounded*responseScale,blurResponse:policy,blurResponseLimited:bounded!==proposed};

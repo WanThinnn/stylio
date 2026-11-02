@@ -7558,3 +7558,281 @@ that case can be inspected and reproduced separately.
 The local private-fixture inventory inspected 84 HEICs with native/original/org
 names and found no square primary, so it cannot substitute for the reported
 square iPhone source/output pair.
+
+Follow-up screenshot: an iPhone 16 Pro 4284x4284, 1.6 MB input is returned at
+1.6 MB with nativeeditmissing / textureonly / unverified-Styles notices. This is
+an earlier preserveIncomplete routing outcome, not evidence of depth-calibration
+failure: Portrait inference/export is skipped. Whether the camera-square input
+actually lacks its Styles graph or discovery misclassifies it requires the exact
+HEIC. Do not bypass the native preservation guard from dimensions or a screenshot.
+The existing Wi-Fi page now accepts a user-selected HEIC/ZIP into ignored private
+fixtures, retaining the original expiry, so the source can be inspected without
+requiring the user to return to the laptop. No native processing change yet.
+
+### 10.190 Camera-square export routing and weak unknown-optics blur (2026-11-01)
+
+The uploaded IMG_3101.heic is 1,641,448 bytes, iPhone 16 Pro, primary 4284x4284
+with EXIF dimensions 5712x4284, focal length about 6.765 mm / 24 mm equivalent.
+It contains primary/HDR grids and a valid ISO tmap but no Styles item, linear
+thumbnail, delta map, ordinary thumbnail or depth. Its eight-key selection is
+0=1, 1=-0.3450643718242645, 2=0.19742488861083984, 3=1, 4=16, 5=0, 6=4, 7=0.
+Source SHA256 f88794161242978f7513e79ffc83a1376c382dc3cc918c9d91c76d21db973238.
+The file really lacks its standalone editor resources; discovery did not lose
+them. This does not establish whether the user manually edited the capture.
+
+The detector admitted only the six-key processed export, so this known eight-key
+variant was preserved and AI skipped. A portable detector regression first fails
+on that shape. The existing reconstruction route now also accepts exactly the
+eight known keys with 5=0, 6=4, 7=0, subject to the same iPhone 16/17, missing
+Styles/linear/delta, no-depth, bounded selection and paired ISO HDR requirements.
+Opaque/unknown fields, 5=1, unsupported cameras and complete native originals
+retain their previous routes. No general native preservation guard is removed.
+The exact uploaded file's worker regression verifies new editor resources,
+original photographic/HDR payloads, selected marker and all capture metadata.
+
+The real app in headless Edge processed this file through HDR-aware thumbnail
+generation, reconstruction, Standard depth/foreground models and Portrait export.
+IMG_3101_CameraFix.HEIC is 1,927,619 bytes, SHA256
+61520a252f3a1b0daded44c8862ba5ea914d94c03c20833e7628cc8abf9fc942.
+It has one 1024x1024 depth, f4.5 and range 0..19.619255899094885. Every original
+non-Exif payload and the selected Style/Tone/Colour/Palette are exact. Camera
+MakerNotes are unchanged except the existing accepted Portrait fields 0x14,
+0x1f and the viewer bit in 0x19. This is a successful app/file check; actual
+Photos control, HDR/colour and save/reopen acceptance is still pending.
+
+User also reports weak blur on square results. In the metadata-poor JPEG case,
+scene-v3 discarded a usable measured separation when EXIF optics were absent,
+falling back to fixed range .6 even after the complete reference calibration
+was restored in 10.189. Generated unknown-optics scenes now use the same scene
+response calculation with that explicit reference profile (ratio one), reported
+as responseCalibration=reference-profile. This does not invent measured camera
+optics. Complete-optics response and native camera depth are unchanged. Flat or
+unstable scenes keep their old guarded fallback; refocus/aperture do not change
+the per-scene calibration. No global blur multiplier or square-only constant.
+
+The real assembler regressions protect matching auxC/XMP range, preview response,
+affine-depth invariance, image preservation and stable range across focus/f edits.
+On accepted IMG_3086_PortraitFix's exact depth and f4.5/focus, background median
+separation 70/255 yields range 1.220357142857143 rather than .6. Conservative
+replay has no unavailable original matte confidence (target .335). The output
+IMG_3086_SceneBlur.HEIC is 2,371,604 bytes, SHA256
+276221cd9fdeaa335cd4a689388bc56349fe58b553dded0d6feb270b6c5551a6.
+Every image/HDR/Styles/Texture/matte/depth payload is exact. Its stronger perceived
+blur and retained Photos controls still require device feedback; the ~2.03 range
+ratio is not a measured optical blur-radius ratio.
+
+Related suite: 184 pass, 14 private-fixture skips, zero failures. Module/release
+checks: three pass; PWA and whitespace checks pass. Cache v258. Both candidates
+are on the existing allowlisted Wi-Fi page with its original 20:20 Bangkok expiry.
+No commit, push or deployment requested.
+
+### 10.191 Camera reconstruction rejected; depth-only declaration probes (2026-11-01)
+
+Device feedback closes the 10.190 trials: IMG_3086_SceneBlur is accepted. Camera
+IMG_3101_CameraFix loses HDR, shifts Styles and still has no adjustable F in Edit,
+despite the viewer f icon. Preserved payloads/selection and successful app execution
+did not imply correct Photos rendering or control eligibility. The automatic
+eight-key reconstruction admission is removed. Portable and real IMG_3101 routing
+regressions first fail on that admission, then pass with byte-exact preservation
+and no AI supplementation. Established six-key and complete-native routes and
+the accepted JPEG corrections remain unchanged; cache v259 refreshes the guard.
+
+Read-only comparison confirms source/CameraFix primary, HDR and tmap payloads and
+existing image properties are exact. The mode-switch effect of the added editing
+graph remains the leading explanation, consistent with 10.116-119. Do not repeat
+the claim that exact HDR bytes prove Photos displays HDR. A fresh-import original
+control is required because earlier implicit-Styles files also lost edit support
+on exact-byte reimport, independently of Stylio.
+
+Private depth-only-candidates.mjs reuses the real additive native writer without
+enabling a new production route. It appends the same encoded AI depth, its XMP and
+focus to untouched IMG_3101 source imagery/HDR/graph, applying only the existing
+accepted MakerNote Portrait fields. No Styles, Texture, linear thumbnail or delta
+resources are added. A uses the source-estimated optics and own HDR capacity
+4.834738731384277. Original image properties, references, all non-Exif payloads,
+Style selection and other camera MakerNotes are verified exact.
+
+A: IMG_3101_A_DepthOnly.HEIC, 1,775,024 bytes, SHA256
+2be56cf38582fa95ed98a37c91ab359aba1927349ad739844710c276843ee480.
+B: IMG_3101_B_PortraitBrand.HEIC, 1,775,028 bytes, SHA256
+4115f508d3e28a8e81cb21119d0b267a876791c1b5f6490f140ab58899555254.
+B differs only by adding compatible brand MiPr; every active item payload,
+property and reference matches A. Accepted native Portrait fixtures carry MiPr;
+3101 source and rejected CameraFix do not. Older MiPr probes on incomplete JPEG
+contracts failed (10.18-19), so this declaration is not presumed sufficient and
+is not integrated before device results. A separate reference-optics diagnostic
+is prepared privately but not in the initial phone set.
+
+A's optics are finite and complete: ref 4284x4284, centered intrinsics, estimated
+fx/fy 3360.6460917, PixelSize .002013005737886097 mm, zero virtual distortion and
+identity extrinsics, high Quality and relative Accuracy. EXIF 5712x4284 versus
+square output leaves crop/FOV uncertainty, not proof of a categorical edit gate.
+Depth and primary orientation match. Viewing f remains insufficient acceptance.
+
+The allowlisted Wi-Fi page now supplies exact original, A and B; rejected
+CameraFix returns HTTP 410. Original expiry remains 20:20 Bangkok. Await phone
+results for original reimport HDR/Styles, A/B Edit aperture/Lighting, colour/HDR
+and save/reopen persistence. These probes do not establish a native-square fix.
+
+Ratio regression coverage now explicitly checks 1:1, 2:3, 3:2, 4:5, 5:4, 3:4,
+4:3, 9:16 and 16:9 against aspect/tile budgets and finite centered, resolution-
+invariant Portrait projection. This is code-level geometry support, not a device
+acceptance matrix for every HEIC/metadata contract.
+
+### 10.192 Exact-source control loses Styles; actual Unmodified original located (2026-11-01)
+
+Phone feedback: exact square IMG_3101_Source reimport keeps HDR but loses Styles.
+A_DepthOnly and B_PortraitBrand both show viewer f, but Edit lacks F/Styles/Texture.
+MiPr is not sufficient on this source. HDR status for A/B was not separately
+confirmed. No depth-only or brand probe is enabled in the app.
+
+The user's Downloads/IMG_3101 (1).HEIC is byte-identical to the uploaded square,
+including SHA256 f88794161242978f7513e79ffc83a1376c382dc3cc918c9d91c76d21db973238.
+The user confirms it was downloaded as Highest Resolution. Downloads/IMG_3101.HEIC
+is the Unmodified Original: 2,383,004 bytes, SHA256
+3977f077d25614a6786e62779a05b9b7e6d19c077582aef51da86c7b95d4c67e.
+It retains native primary 5712x4284 (45 tiles), styles119, linear65, delta115,
+thumbnail66 and HDR62. The two files share capture/processing UUIDs, timestamp
+2026:11:01 19:29:49.235 and selected Style/pad/palette. Only selection field5 is
+1 in Unmodified versus0 in Highest. This pair directly establishes that the
+rendered square export omitted editing resources; it is not an unknown-format
+or aspect-ratio-only failure. The unmodified file itself has a 3:4 display frame.
+
+App messaging now distinguishes missing original editing data from an unknown
+Styles schema. It no longer claims that the user changed Style or has a new
+format. The missing-native-styles skip explains how to choose Export Unmodified
+Originals / Unmodified Originals rather than Highest Resolution; unknown-schema
+handling remains separate. Skip/retry regressions exercise this distinction.
+Apple's current original-download steps: https://support.apple.com/en-us/111762.
+
+The real native app route processes Unmodified directly without reconstruction,
+retaining its actual Styles calibration/linear/delta and HDR. Output
+IMG_3101_OriginalPortrait.HEIC is 2,511,414 bytes, SHA256
+344796aed60c337d40c5400c384d3be4221e84884882c04f06d7d456eddc32ae.
+An added real-source regression checks the existing Texture route remains exact
+to its native writer and preserves every source payload/property/reference.
+
+Private crop-candidates.mjs produces D_SquareAperture by adding centered square
+clean-aperture properties ONLY to the complete result's primary46 and tmap118,
+before their existing orientation transforms. ispe/grid data, every item payload,
+all other property bytes/order and references are exact. D is 2,511,496 bytes,
+SHA256 94bbeed98d77170896a327b798497fea8f0a4967781eaa16074c99d0893355c7.
+Actual cached libheif decodes it at4284x4284. This proves SDR viewport decoding,
+not Photos HDR/depth/Styles coordinate behavior; native auxiliary/calibration
+resources remain uncropped. Full-native Portrait and D are the next phone pair.
+Do not integrate crop behavior before those results, or replace Highest's current
+pixels/selection with an original implicitly. All rejected older variants are
+withdrawn from the Wi-Fi page. Its original20:20 Bangkok expiry remains.
+
+Device results: full-native IMG_3101_OriginalPortrait is accepted for F/Lighting,
+HDR, colour/Styles and Texture. D_SquareAperture has editable F and normal Styles,
+but moving to f16 makes the image black; disabling Portrait restores the image.
+The user separately confirms HDR is lost. D is rejected and not integrated.
+The user then crops the accepted full-native file to1:1 IN PHOTOS and explicitly
+confirms F16, HDR and Styles remain normal. That is the accepted camera-square
+workflow so far; it is not acceptance of file-level clap cropping.
+
+The next private synchronization probe is based on the complete accepted native
+result, not on a reconstructed Highest export: crop base and gain inputs plus
+root auxiliaries in their own grids, update depth/focus coordinates and tmap
+display dimensions, and avoid applying crop to tmap itself. Public libavif writer
+guidance explains transforms belong on tmap inputs, not derived tmap, but Apple's
+original HEIC tmap dimensions follow its own oriented convention. Thus this is a
+source-specific diagnostic, not a universal HEIC conversion rule. The existing
+accepted JPEG and native routes remain intact while its device result is pending.
+
+### 10.193 Synchronized square crop E prepared for device retry (2026-11-02)
+
+IMG_3101_E_SquareAllMaps.HEIC is 2,517,760 bytes, SHA256
+dce1e5ff553f05a429ce1a1ec5e41b5629f7b55e64056bf938a1d0f11835ca53.
+It starts from the accepted complete native OriginalPortrait. The centered crop
+is synchronized across 19 image roots (primary, gain map, depth, original Styles
+auxiliaries, Texture mattes and thumbnail), before each item's orientation. The
+derived tmap has square4284 ispe and no additional clap, unlike rejected D.
+No encoded image, Style plist, HDR tmap parameters, depth range, PixelSize or
+REND payload changes. Depth/focus XMP alone are transformed to the cropped grid:
+reference5712x4284 becomes4284x4284, intrinsic/lens-center X subtracts714, focal
+values remain3960.5594010481354, and focus(.51806640625,.666015625) becomes
+(.5240885416666666,.666015625). All references and other properties remain exact.
+Cached libheif reports square4284x4284. This remains a source-specific file-level
+diagnostic: Photos f16, HDR, Style colour and save/reopen behavior are unproven.
+
+The user resumes testing on Nov2. The previous server expired; current Wi-Fi
+address is192.168.1.3, port8775. The selected-file server is renewed for one hour,
+expires2026-11-02T07:43:36.732Z (14:43 Bangkok). E download returns200 with the
+exact hash above; rejected D returns410. OriginalPortrait remains the accepted
+control. No crop operation is enabled in production and no commit/push is made.
+
+Latest production regression run before this artifact-only retry:189 pass,
+14 missing-private-fixture skips,0 fail; module/release3 pass. PWA, i18n and
+whitespace checks pass. Missing-original copy and ratio coverage are included.
+
+Device result for E: editable F and Portrait Lighting work, Styles/Texture are
+normal, and HDR works. However, entering Edit shows a blurred ghost/overlaid
+image, and changing any parameter then saving writes that ghost into the photo.
+The user explicitly repeats the test with Portrait/F switched OFF first, then
+only a small brightness change: the ghost persists. E is not accepted. This
+rules out a depth-only explanation; private Styles/rendering resources must be
+checked for crop handling. No E crop code is enabled in production.
+
+A real cached-libheif RGBA check displays both complete source and E: every one
+of18,352,656 E pixels exactly matches the fullnative center crop at displayed
+(left0,top714), with0 RGB/alpha differences and99.7966% nonblack pixels. Thus
+primary SDR crop decode is correct; this does not validate Photos' edit renderer.
+Next isolated probes materialize a true square linear thumbnail and, separately,
+the tile-aligned delta crop, instead of relying on clap interpretation by those
+private readers. Other image/HDR/depth resources and calibration remain fixed.
+
+### 10.194 Linear-thumbnail square probe F prepared (2026-11-02)
+
+IMG_3101_F_LinearCrop.HEIC is 2,814,520 bytes, SHA256
+bbfee1dc71bb6713f3d33dc8fecb2972e48a3de6b6ef647d0867c378e169b19d.
+It starts from E and changes only native Styles linear thumbnail item65. Its
+1024x768 decoded yuv420p10le data is center-cropped at x128 to768x768, then
+encoded losslessly as Main10 full-range HEVC with unchanged VUI2/2/2. Exact
+decoded YUV readback matches all1,769,472 cropped bytes. The item's clap is
+removed, ispe becomes768x768 and hvcC/payload are replaced. Every other item
+payload/property and every reference remains byte-exact to E. Cached libheif
+RGBA display of F and E is identical across all18,352,656 primary pixels.
+
+This is a private device diagnostic, not a production fix. It tests whether
+Photos Edit ignored the clap on the Styles linear thumbnail and composited its
+old4:3 frame as the blurred ghost. Delta item115 remains E's clapped4:3 grid so
+the variables are isolated. The Wi-Fi page serves F as the primary test and E
+as the failing control; link expiry is2026-11-02T08:29:23.861Z (15:29 Bangkok).
+HTTP verification returned200,2,814,520 bytes and the exact hash above. Device
+status is pending: enter Edit, then Portrait-off plus a small Brightness edit
+and save, followed by F/Lighting/HDR/Styles/Texture checks.
+
+A separate private G diagnostic is prepared but not served. It materializes
+delta item115 from4096x3072 8x6 tiles to3072x3072 6x6 by selecting the central
+six columns without re-encoding. All other resources remain exact. Keeping G
+off the page preserves a one-variable device test for F.
+
+Phone result rejects F: F and Styles remain editable, but entering Edit still
+shows the same blurred4:3 image behind/over the square frame, and saving any edit
+persists the ghost. The user supplied a screenshot of this exact symptom. Thus
+the native linear thumbnail's clapped4:3 geometry is not the cause; F remains a
+private failed diagnostic and no production behavior changes.
+
+G is now the selected one-variable phone probe. Its delta115 root is physically
+3072x3072 with a6x6 grid selecting the central six columns of the original8x6
+tile graph; all encoded tiles are unchanged. Decoded10-bit YUV is byte-exact to
+the expected center crop. Actual libheif display of G and E also matches all
+18,352,656 primary pixels exactly. Wi-Fi delivery returned200,2,517,763 bytes,
+SHA256 82c679e1cf77ad564f71816cfd28c6db57a62307d03b678b82cb61e61a16967d.
+The renewed link expires2026-11-02T08:35:28.826Z (15:35 Bangkok). Device status
+is pending. If G fails identically, the next isolated target is the non-neutral
+32x32 c/d light maps inside native Styles plist119; base/HDR physical cropping
+remains a later, higher-risk diagnostic.
+
+Phone result rejects G as well: F and Styles remain editable, but the same
+blurred4:3 layer appears in Edit and persists after saving. The physical delta
+grid geometry is therefore not the cause. At the user's request, investigation
+of this native-camera square file-level crop is stopped. Do not promote E, F, G,
+the pending c/d light-map idea, or physical base/gain cropping into production.
+The temporary Wi-Fi server is stopped. Existing accepted behavior remains:
+metadata-poor external square/JPEG uses the accepted calibration and scene-blur
+fix; complete native Unmodified input stays on its exact native preservation
+route; incomplete Highest camera exports remain preserved/skipped rather than
+reconstructed; the accepted native result may be cropped1:1 inside Photos.

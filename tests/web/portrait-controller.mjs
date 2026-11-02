@@ -3,31 +3,59 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {createPortraitProgress} from '../../web/src/app/processing/portrait-progress.js';
+import {AI_STRINGS} from '../../web/src/ui/ai-strings.js';
 
 // Keep the real queue/publication lifecycle; replace only costly AI/codec imports.
-function controller({failure=null,previewPending=false,disparityMax,previewDisparityMax,stages=[],acquireProcessingSlot}={}){
+function controller({failure=null,previewPending=false,disparityMax,previewDisparityMax,stages=[],acquireProcessingSlot,eligibility=null,portraitEnabled=true}={}){
  let source=readFileSync(new URL('../../web/src/app/processing/portrait-controller.js',import.meta.url),'utf8')
   .replace(/^import .*;\r?\n/gm,'').replace('export function createPortraitController','function createPortraitController');
  for(const[name,replacement]of [
   ["await import('../../portrait/ai-portrait.js')",'testDependencies'],
   ["await import('../../portrait/ai-portrait-export.js')",'testDependencies'],
+  ["await import('../../portrait/ai-portrait-container.js')",'testDependencies'],
  ]){assert.ok(source.includes(name));source=source.replace(name,replacement);}
  const create=runInNewContext(source+';createPortraitController;',{
   AbortController,DOMException,setTimeout,clearTimeout,Uint8Array,File,createPortraitProgress,
   releaseDecodeCache(){},releaseHevcEncoder(){},releaseRasterEncoder(){},releaseHeicProcessor(){},photoCaptureDate:()=>null,
-  console:{warn(){}},testDependencies:{createAiPortrait:async(_data,onProgress)=>{for(const event of stages)onProgress(...event);if(failure)throw failure;return {};},
+  console:{warn(){}},testDependencies:{portraitEligibility:()=>eligibility,createAiPortrait:async(_data,onProgress)=>{for(const event of stages)onProgress(...event);if(failure)throw failure;return {};},
    exportAiPortrait:async()=>({data:Uint8Array.of(1),report:{disparityMax,previewDisparityMax},dispose(){},withSettings(){}})},
  });
- const progress=[],states=[];
- const ui={outputPendingState:true,progress:value=>progress.push(value),aiState:value=>states.push(value),note(){},aiBusy(){},aiView(){},cancelAi:()=>()=>{},cleanup(){},
+ const progress=[],states=[],notes=[],busy=[],candidates=[];
+ const ui={outputPendingState:true,progress:value=>progress.push(value),aiState:value=>states.push(value),note:(...value)=>notes.push(value),aiBusy:value=>busy.push(value),aiView(){},cancelAi:()=>()=>{},cleanup(){},
   output(file){this.published=file;},outputPending(pending){this.outputPendingState=pending;},
   async portraitPreview(result){this.previewResult=result;this.portraitPending=previewPending;},
  };
- const runner=create({aiFeatures:{enabled:id=>id==='portrait'},aiCandidates:[],aiText:()=>({}),
+ const runner=create({aiFeatures:{enabled:id=>id==='portrait'&&portraitEnabled},aiCandidates:candidates,aiText:()=>AI_STRINGS.en,
   gpuAcceleration:{checked:true},selectedAiLevel:()=> 'lite',acquireProcessingSlot});
  const original=new File([Uint8Array.of(0)],'styles.HEIC');
- return {ui,original,progress,states,candidate:{ui,outputFile:original,name:'photo.JPEG',state:'new'},runner};
+ return {ui,original,progress,states,notes,busy,candidates,candidate:{ui,outputFile:original,name:'photo.JPEG',state:'new'},runner};
 }
+
+for(const portraitEnabled of [true,false])test(`missing native Styles preserves the normal output with a source-data notice (Portrait ${portraitEnabled?'on':'off'})`,async()=>{
+ const {ui,original,runner,candidates,notes,busy,progress}=controller({portraitEnabled,failure:Error('AI must not run')});
+ await runner.tryAiPortrait(Uint8Array.of(1),original,ui,'native.HEIC',null,true);
+ assert.equal(candidates.length,1);assert.equal(candidates[0].skip,'missing-native-styles');
+ assert.equal(candidates[0].state,'skipped');assert.equal(ui.published,original);
+ assert.deepEqual(notes,[[AI_STRINGS.en.missingNativeStyles,'compatibility']]);
+ assert.equal(busy.at(-1),false);assert.equal(progress.at(-1),100);
+ assert.equal(candidates[0].aiFile,undefined);
+});
+
+test('an unknown native Styles schema keeps its separate compatibility notice',async()=>{
+ const {ui,original,runner,candidates,notes}=controller({eligibility:'unverified-styles',failure:Error('AI must not run')});
+ await runner.tryAiPortrait(Uint8Array.of(1),original,ui,'future.HEIC');
+ assert.equal(candidates[0].skip,'unverified-styles');assert.equal(candidates[0].state,'skipped');
+ assert.equal(ui.published,original);assert.deepEqual(notes,[[AI_STRINGS.en.compatibility,'compatibility']]);
+});
+
+test('missing-source skip still blocks inference when a queued candidate is retried',async()=>{
+ const {ui,original,candidate,runner,notes,busy,progress}=controller({failure:Error('AI must not run')});
+ ui.output(original);candidate.skip='missing-native-styles';
+ await runner.runAiCandidate(candidate);
+ assert.equal(candidate.state,'skipped');assert.equal(ui.published,original);
+ assert.deepEqual(notes,[[AI_STRINGS.en.missingNativeStyles,'compatibility']]);
+ assert.equal(busy.at(-1),false);assert.equal(progress.at(-1),100);
+});
 
 for(const[kind,failure]of [['failure',Error('inference failed')],['cancellation',new DOMException('Cancelled','AbortError')],['success',null]]){
  test(`queued Portrait ${kind} releases the save lock after publishing`,async()=>{

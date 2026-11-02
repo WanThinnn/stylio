@@ -19,7 +19,7 @@ function exif(model,marker){
 }
 
 // A graph fixture, with synthetic picture samples and no personal EXIF or pixels.
-export async function nativeStyleExport({model='iPhone 16 Pro',preset=1,tone=0,color=0,palette=1,modernMarker=false,iso=true,retainLinearThumb=false}={}){
+export async function nativeStyleExport({model='iPhone 16 Pro',preset=1,tone=0,color=0,palette=1,modernMarker=false,markerState=modernMarker?1:0,captureVersion=4,captureFlags=0,iso=true,retainLinearThumb=false}={}){
   const p=await profile,d=discoverHeic(p.meta);
   const keep=new Set([d.primary,...d.primaryTiles,d.hdrGrid,...d.hdrTiles,d.thumbnail,d.exifItem,
     ...(retainLinearThumb&&d.linearThumb!==null?[d.linearThumb]:[])]);
@@ -28,8 +28,8 @@ export async function nativeStyleExport({model='iPhone 16 Pro',preset=1,tone=0,c
   const hdrProps=graph.props.associations.get(graph.hdrGrid).filter(a=>graph.props.properties[a.index-1].type!=='auxC').map(a=>[a.index,a.essential]);
   meta=setItemPropertyAssociations(meta,graph.hdrGrid,hdrProps);
   meta=setItemReference(meta,'auxl',graph.hdrGrid,[]);
-  const marker=new Map([['0',1],['1',new BplistReal(tone)],['2',new BplistReal(color)],['3',new BplistReal(palette)],['4',preset],['5',modernMarker?1:0]]);
-  if(modernMarker){marker.set('6',4);marker.set('7',0);}
+  const marker=new Map([['0',1],['1',new BplistReal(tone)],['2',new BplistReal(color)],['3',new BplistReal(palette)],['4',preset],['5',markerState]]);
+  if(modernMarker){marker.set('6',captureVersion);marker.set('7',captureFlags);}
   const payloads=new Map([[graph.exifItem,exif(model,marker)]]);
   if(iso){
     let ids;[meta,ids]=addItems(meta,[{key:'iso',itemType:'tmap',refType:'dimg',refTo:[graph.primary,graph.hdrGrid]}]);

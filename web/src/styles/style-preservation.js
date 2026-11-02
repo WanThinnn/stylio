@@ -36,7 +36,9 @@ export function preserveNativeStyles(data, discovery = discoverHeic(data)) {
 
 /** Recognize the six-key iPhone 16/17 export seen after changing a captured Style.
  * This identifies a file shape, not edit history or guaranteed Photos controls.
- * Opaque native markers and Portrait exports remain on their existing routes.
+ * Eight-key exports stay preserved: reconstruction of camera-square IMG_3101
+ * lost HDR, shifted Styles and did not restore Edit aperture on-device.
+ * Other opaque native markers and Portrait exports retain their existing routes.
  */
 export function nativeStyleExportTextureCandidate(data, d = discoverHeic(data)) {
   if(d.stylesItem!==null||d.linearThumb!==null||d.deltaGrid!==null||d.hdrGrid===null||d.exifItem===null)return false;

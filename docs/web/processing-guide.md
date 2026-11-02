@@ -2,6 +2,36 @@
 
 This consolidates the previous `web/AI-PORTRAIT.md` and `web/DNG.md`. Paths and commands are relative to the repository root. Device experiment history remains in `facts.md`.
 
+### Aspect ratios and editing compatibility
+
+Image geometry is not limited to 3:4 or 16:9. Raster import and generated Portrait
+geometry handle square, 2:3, 4:5 and other ratios, preserving the aspect ratio
+within integer rounding and resizing large images to the encoder's tile budget.
+Regression coverage explicitly includes 1:1, 2:3, 3:2, 4:5, 5:4, 3:4, 4:3, 9:16
+and 16:9, including resolution-invariant Portrait projection/response.
+
+Geometry support does not guarantee Apple Photos editing for every file at that
+ratio. Complete native HEIC editor resources are preserved. An exported/cropped
+HEIC can lack the original Styles resources even when its camera model and selected
+Style remain. Native graph reconstruction outside the measured size layouts uses
+experimental geometry; its output still needs device validation.
+
+The square iPhone 16 Pro IMG_3101 is such an incomplete eight-key export. Its
+reconstruction trial lost HDR, shifted Styles and failed aperture editing on the
+phone. That automatic route has been withdrawn; this input remains byte-exact
+while depth-only diagnostics are tested. The JPEG-derived square Portrait repair
+and scene-based blur response were separately accepted on the phone. Neither
+result is a blanket validation of camera HEICs or every aspect ratio.
+
+For this matched IMG_3101 capture, **Highest Resolution** produces the flattened
+4284-square file; **Unmodified Originals** retains the 5712x4284 native image and
+its actual Styles editing resources. Use Photos → Share → Export Unmodified
+Originals, or choose Unmodified Originals in iCloud download options, to supply
+those resources. Apple documents these [original-download options](https://support.apple.com/en-us/111762).
+The square framing is not retained by that original file. A separate crop
+descriptor trial preserves all native image/editing payloads; it is not an
+enabled app crop feature or an accepted Photos workflow until device-tested.
+
 ### Edited native Styles exports
 
 Some iPhone 16/17 exports after changing a captured Style carry a six-key
@@ -615,12 +645,15 @@ Complete model downloads are SHA-256 verified and cached by content hash;
 runtime caching uses its pinned dependency identity rather than the UI release.
 No image is sent to a server. Safari/device memory and latency vary.
 
-Generated AI disparity uses the device-accepted F response: a square-root curve
-and relative range [0, 0.75]. Preview, auxiliary depth descriptor and XMP use
-the same response, including subsequent focus/aperture edits. This compresses
-near-side defocus relative to distant background in the tested scene; it is an
-empirical adjustment, not metric camera calibration or a hair-detail fix. Native
-depth is never remapped.
+Generated AI disparity keeps the square-root response curve, with a relative
+range calibrated from usable scene separation and the export's optical profile.
+Sources without usable EXIF optics use the explicit reference editing profile;
+they also retain scene-based response rather than always falling back to a fixed
+weak range. Flat or unstable scenes retain the guarded fallback. Exported auxC
+and XMP share the calibrated range; preview uses its corresponding optical
+compensation. This scene calibration stays fixed during focus/aperture edits.
+This is an empirical effect policy, not metric camera depth or a hair-detail fix.
+Native camera depth is never remapped.
 
 Clear cache sits beside Clear history. It removes this app's downloaded model
 and processor cache entries and releases idle converter resources. It preserves

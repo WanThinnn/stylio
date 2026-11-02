@@ -73,6 +73,51 @@ test('opaque native marker stays on exact preservation rather than experimental 
   assert.ok(result.events.some(e=>e[0]==='advice'&&e[1]==='warn.nativeeditmissing'));
 });
 
+test('eight-key processed camera exports remain exact after the rejected IMG_3101 reconstruction trial',async()=>{
+  for(const preset of [1,4,8,16]){
+    const source=await nativeStyleExport({modernMarker:true,markerState:0,preset,tone:-.345,color:.197});
+    const d=discoverHeic(source);
+    const editedStyleExportCandidate=nativeStyleExportTextureCandidate(source,d);
+    assert.equal(editedStyleExportCandidate,false,
+      'IMG_3101 reconstruction lost HDR, shifted Styles and failed Edit aperture on device');
+    assert.equal(useTextureOnlyNativeStylePath({textureOnly:true,rebuildNativePortrait:false,
+      editedStyleExportCandidate,stylesItem:d.stylesItem}),true);
+    const result=await processNativeFile(source);
+    assert.match(result.output.name,/_Preserved\.HEIC$/);assert.deepEqual(result.data,source);
+    assert.equal(result.softSkinCalls,0,'incomplete native export must not enter AI supplementation');
+    assert.ok(result.events.some(e=>e[0]==='advice'&&e[1]==='warn.nativeeditmissing'));
+  }
+  for(const options of [{modernMarker:true},{modernMarker:true,markerState:2},
+    {modernMarker:true,markerState:0,captureVersion:99},{modernMarker:true,markerState:0,captureFlags:1},
+    {modernMarker:true,markerState:0,iso:false},{modernMarker:true,markerState:0,model:'iPhone 18 Pro'}])
+    assert.equal(nativeStyleExportTextureCandidate(await nativeStyleExport(options)),false);
+});
+
+const cameraSquare=process.env.STYLIO_SQUARE_NATIVE||new URL('../private-fixtures/square-portrait/IMG_3101_Source.HEIC',import.meta.url);
+test('reported IMG_3101 camera square stays byte-exact without reconstruction or AI supplementation',{
+  skip:!fs.existsSync(cameraSquare),
+},async()=>{
+  const source=new Uint8Array(fs.readFileSync(cameraSquare)),d=discoverHeic(source);
+  assert.equal(nativeStyleExportTextureCandidate(source,d),false);
+  const result=await processNativeFile(source,'IMG_3101.HEIC');
+  assert.match(result.output.name,/_Preserved\.HEIC$/);assert.deepEqual(result.data,source);
+  assertSourcePreserved(source,result.data);
+  assert.equal(result.softSkinCalls,0);
+  assert.ok(result.events.some(e=>e[0]==='advice'&&e[1]==='warn.nativeeditmissing'));
+});
+
+const cameraUnmodified=process.env.STYLIO_SQUARE_UNMODIFIED||new URL('../private-fixtures/square-portrait/IMG_3101_Unmodified.HEIC',import.meta.url);
+test('same IMG_3101 Unmodified capture keeps its actual native Styles and HDR through the existing Texture route',{
+  skip:!fs.existsSync(cameraUnmodified),
+},async()=>{
+  const source=new Uint8Array(fs.readFileSync(cameraUnmodified)),before=discoverHeic(source);
+  assert.notEqual(before.stylesItem,null);assert.notEqual(before.linearThumb,null);assert.notEqual(before.deltaGrid,null);
+  const result=await processNativeFile(source,'IMG_3101_Unmodified.HEIC');
+  assert.match(result.output.name,/_TextureGrain\.HEIC$/);
+  assert.deepEqual(result.data,addTexture(source,{preserveStyles:true}).data);
+  assertSourcePreserved(source,result.data);
+});
+
 test('complete native originals stay on the existing Texture route for every tested Style and remain idempotent',async()=>{
   const profile=await loadProfile(new Uint8Array(fs.readFileSync(new URL('../../web/profiles/48-12.zip',import.meta.url))));
   const asset=JSON.parse(fs.readFileSync(new URL('./raster-hevc.fixture.json',import.meta.url))).assets.delta;
