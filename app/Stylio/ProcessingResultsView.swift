@@ -2,6 +2,24 @@ import ImageIO
 import SwiftUI
 import UIKit
 
+struct ProcessingResultsButton: View {
+    @EnvironmentObject private var processing: PhotoProcessing
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: processing.isProcessing ? "tray.and.arrow.down" : "tray")
+                .overlay(alignment: .topTrailing) {
+                    if processing.hasResultErrors {
+                        Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 4, y: -3)
+                    }
+                }
+        }
+        .accessibilityLabel("Processing Results")
+        .accessibilityValue(processing.isProcessing ? Text("Processing") : processing.hasResultErrors ? Text("Contains errors") : Text(""))
+    }
+}
+
 struct ProcessingResultsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var processing: PhotoProcessing
@@ -12,9 +30,9 @@ struct ProcessingResultsView: View {
             List(processing.jobs) { job in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(job.name).font(.headline)
-                    Text(job.saved ? "Saved to Photos" : job.message)
+                    Text(job.message)
                         .font(.subheadline)
-                        .foregroundStyle(job.failed ? Color.red : Color.secondary)
+                        .foregroundStyle(job.failed || job.saveError != nil ? Color.red : Color.secondary)
                     if let progress = job.progress {
                         ProgressView(value: progress, total: 100)
                             .accessibilityLabel("Processing photo")
@@ -28,12 +46,12 @@ struct ProcessingResultsView: View {
                             Text(error).font(.footnote).foregroundStyle(.red)
                         }
                         HStack {
-                            if !job.saved {
-                                Button(output.movie == nil ? "Save to Photos" : "Save Live Photo") {
-                                    Task { await processing.save(job.id) }
+                            if job.saveError != nil {
+                                Button("Retry Save") {
+                                    Task { await processing.retrySaving(job.id) }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(job.saving)
+                                .disabled(processing.isBusy)
                             }
                             ShareLink(items: [output.photo] + (output.movie.map { [$0] } ?? []))
                                 .buttonStyle(.bordered)
@@ -47,6 +65,7 @@ struct ProcessingResultsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
+        .presentationDetents([.medium, .large])
     }
 }
 

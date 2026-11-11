@@ -27,7 +27,6 @@ final class PhotoProcessing: ObservableObject {
         var result: Output?
         var failed = false
         var saving = false
-        var saved = false
         var saveError: String?
     }
 
@@ -40,7 +39,7 @@ final class PhotoProcessing: ObservableObject {
     }
 
     private enum ProcessingError: LocalizedError {
-        case photoUnavailable, photosAccess, unsupportedMovie, emptySelection
+        case photoUnavailable, photosAccess, unsupportedMovie, emptySelection, busy
 
         var errorDescription: String? {
             switch self {
@@ -48,6 +47,7 @@ final class PhotoProcessing: ObservableObject {
             case .photosAccess: "Allow Stylio to add photos in the iOS Settings app."
             case .unsupportedMovie: "Select the still image alongside its Live Photo MOV."
             case .emptySelection: "Select a photo to process."
+            case .busy: "Stylio is busy. Try again in a moment."
             }
         }
     }
@@ -57,6 +57,7 @@ final class PhotoProcessing: ObservableObject {
     @Published private(set) var isMaintaining = false
     @Published private(set) var resetCount = 0
     var isBusy: Bool { isProcessing || isMaintaining || jobs.contains(where: \.saving) }
+    var hasResultErrors: Bool { jobs.contains { $0.failed || $0.saveError != nil } }
 
     private let engine = NativeEngine()
     private let workDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("StylioProcessing", isDirectory: true)
@@ -64,7 +65,7 @@ final class PhotoProcessing: ObservableObject {
     init() { try? FileManager.default.removeItem(at: workDirectory) }
 
     func start(assets: [PHAsset], files: [URL]) throws {
-        guard !isBusy else { return }
+        guard !isBusy else { throw ProcessingError.busy }
         let (movies, photos) = files.reduce(into: ([URL](), [URL]())) { groups, file in
             if file.pathExtension.lowercased() == "mov" { groups.0.append(file) }
             else { groups.1.append(file) }
@@ -81,10 +82,10 @@ final class PhotoProcessing: ObservableObject {
         let inputs = assets.map(Input.photo) + imported
         guard !inputs.isEmpty else { throw ProcessingError.emptySelection }
 
-        if FileManager.default.fileExists(atPath: workDirectory.path) {
-            try FileManager.default.removeItem(at: workDirectory)
+        for job in jobs where job.saveError == nil {
+            try? FileManager.default.removeItem(at: workFolder(for: job.id))
         }
-        jobs = inputs.map { Job(name: $0.name) }
+        jobs = inputs.map { Job(name: $0.name) } + jobs.filter { $0.saveError != nil }
         isProcessing = true
         let preferences = UserDefaults.standard
         let options: [String: Any] = [
@@ -107,11 +108,16 @@ final class PhotoProcessing: ObservableObject {
         }
     }
 
-    func save(_ id: UUID) async {
-        guard let index = jobs.firstIndex(where: { $0.id == id }), let output = jobs[index].result,
-              !jobs[index].saving, !jobs[index].saved, !isMaintaining else { return }
+    func retrySaving(_ id: UUID) async {
+        guard !isBusy, let index = jobs.firstIndex(where: { $0.id == id && $0.saveError != nil }) else { return }
+        await saveResult(at: index)
+    }
+
+    private func saveResult(at index: Int) async {
+        guard let output = jobs[index].result else { return }
         jobs[index].saving = true
         jobs[index].saveError = nil
+        jobs[index].message = output.movie == nil ? "Saving to Photos…" : "Saving Live Photo…"
         defer { jobs[index].saving = false }
         do {
             var authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
@@ -124,8 +130,9 @@ final class PhotoProcessing: ObservableObject {
                 creation.addResource(with: .photo, fileURL: output.photo, options: nil)
                 if let movie = output.movie { creation.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
             }
-            jobs[index].saved = true
+            jobs[index].message = output.movie == nil ? "Saved to Photos" : "Live Photo saved to Photos"
         } catch {
+            jobs[index].message = "Couldn’t save to Photos"
             jobs[index].saveError = error.localizedDescription
         }
     }
@@ -149,7 +156,7 @@ final class PhotoProcessing: ObservableObject {
     }
 
     private func process(_ input: Input, at index: Int, options: [String: Any]) async {
-        let folder = workDirectory.appendingPathComponent(jobs[index].id.uuidString, isDirectory: true)
+        let folder = workFolder(for: jobs[index].id)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             jobs[index].message = "Reading the original photo…"
@@ -163,12 +170,12 @@ final class PhotoProcessing: ObservableObject {
             switch result.movie {
             case .none:
                 if case .photo(let asset) = input, asset.mediaSubtypes.contains(.photoLive) {
-                    notes.append("The paired video could not be found. The result can be saved as a still photo.")
+                    notes.append("The paired video could not be found. This result is a still photo.")
                 }
             case .compatible: movie = files.movie
             case .repaired: movie = files.movieOutput
-            case .needsTracks: notes.append("The original motion lacks the metadata this edit needs. The result can be saved as a still photo.")
-            case .mismatch: notes.append("The image and video pairing IDs could not be verified. The result can be saved as a still photo.")
+            case .needsTracks: notes.append("The original motion lacks the metadata this edit needs. This result is a still photo.")
+            case .mismatch: notes.append("The image and video pairing IDs could not be verified. This result is a still photo.")
             }
             if let originalMovie = files.movie, originalMovie != movie { try? FileManager.default.removeItem(at: originalMovie) }
             try? FileManager.default.removeItem(at: files.input)
@@ -176,14 +183,18 @@ final class PhotoProcessing: ObservableObject {
             if photo != files.output { try FileManager.default.moveItem(at: files.output, to: photo) }
             let asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
             jobs[index].result = Output(photo: photo, movie: movie, notes: notes, date: asset?.creationDate, location: asset?.location)
-            jobs[index].message = movie == nil ? "Ready to save" : "Live Photo ready to save"
             jobs[index].progress = nil
+            await saveResult(at: index)
         } catch {
             try? FileManager.default.removeItem(at: folder)
             jobs[index].failed = true
             jobs[index].message = error.localizedDescription
             jobs[index].progress = nil
         }
+    }
+
+    private func workFolder(for id: UUID) -> URL {
+        workDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
     private func stage(_ input: Input, in folder: URL) async throws -> ProcessingFiles {

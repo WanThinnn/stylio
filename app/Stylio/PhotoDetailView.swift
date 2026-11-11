@@ -192,10 +192,8 @@ struct PhotoDetailView: View {
                 }
                 .accessibilityLabel("Photo Info")
                 if !processing.jobs.isEmpty {
-                    Button { showsResults = true } label: {
-                        Image(systemName: "tray").frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Processing Results")
+                    ProcessingResultsButton { showsResults = true }
+                        .frame(width: 44, height: 44)
                 }
             }
             .font(.title3)
@@ -265,7 +263,6 @@ struct PhotoDetailView: View {
     private func processPhoto() {
         do {
             try processing.start(assets: [asset], files: [])
-            showsResults = true
         } catch let failure {
             error = failure.localizedDescription
         }

@@ -24,6 +24,7 @@ struct ProcessView: View {
     let album: PHAssetCollection?
     let isSearch: Bool
     @Binding var timeline: LibraryTimeline
+    private let timelineVisibility: Binding<Bool>?
     @Binding private var query: String
 
     @Environment(\.openURL) private var openURL
@@ -45,9 +46,11 @@ struct ProcessView: View {
     @State private var matches: SearchResult?
     @Namespace private var photoTransition
 
-    init(album: PHAssetCollection? = nil, timeline: Binding<LibraryTimeline> = .constant(.all), searchText: Binding<String>? = nil) {
+    init(album: PHAssetCollection? = nil, timeline: Binding<LibraryTimeline> = .constant(.all),
+         searchText: Binding<String>? = nil, timelineVisibility: Binding<Bool>? = nil) {
         self.album = album
         isSearch = searchText != nil
+        self.timelineVisibility = timelineVisibility
         _timeline = timeline
         _query = searchText ?? .constant("")
     }
@@ -97,7 +100,7 @@ struct ProcessView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if !processing.jobs.isEmpty {
-                        Button("Processing Results", systemImage: "tray") { showsResults = true }
+                        ProcessingResultsButton { showsResults = true }
                     }
                     if let photos = visiblePhotos, photos.count > 0 {
                         if !isSearch { sortMenu }
@@ -213,6 +216,7 @@ struct ProcessView: View {
                         periodGrid(photos, width: geometry.size.width)
                     }
                 }
+                .modifier(LibraryTimelineScroll(visibility: timelineVisibility, allowsTimeline: !selecting && files.isEmpty))
                 .task(id: scrollTarget) {
                     guard let scrollTarget else { return }
                     await Task.yield()
@@ -414,9 +418,38 @@ struct ProcessView: View {
             try processing.start(assets: library.selectedAssets(selection, sort: sort, ascending: ascending), files: files)
             clearSelection()
             files = []
-            showsResults = true
         } catch let failure {
             error = failure.localizedDescription
+        }
+    }
+}
+
+private struct LibraryTimelineScroll: ViewModifier {
+    let visibility: Binding<Bool>?
+    let allowsTimeline: Bool
+    @State private var userIsScrolling = false
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), let visibility {
+            content
+                .onScrollPhaseChange { _, phase in
+                    userIsScrolling = phase == .interacting || phase == .decelerating
+                }
+                .onScrollGeometryChange(for: Int.self) { geometry in
+                    let offset = geometry.contentOffset.y + geometry.contentInsets.top
+                    let scrollableHeight = max(0, geometry.contentSize.height + geometry.contentInsets.top
+                        + geometry.contentInsets.bottom - geometry.containerSize.height)
+                    return Int(min(max(0, offset), scrollableHeight) / 20)
+                } action: { previous, current in
+                    guard allowsTimeline, userIsScrolling else { return }
+                    let requested = current > previous
+                    if visibility.wrappedValue != requested { visibility.wrappedValue = requested }
+                }
+                .onChange(of: allowsTimeline) { _, allowed in
+                    if !allowed { visibility.wrappedValue = false }
+                }
+        } else {
+            content
         }
     }
 }

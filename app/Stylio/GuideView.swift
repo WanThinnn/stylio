@@ -4,13 +4,13 @@ struct GuideView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                GuideCard("How to use", summary: "Choose, process, save, then fine-tune in Photos.", icon: "photo", tint: .blue) {
+                GuideCard("How to use", summary: "Process a photo, then fine-tune it in Photos.", icon: "photo", tint: .blue) {
                     Text("Open a photo in Library or Albums and tap Add Styles. To process several photos together, tap Select, choose photos, and tap Process.")
-                    Text("Save your result and open it in Photos → Edit to adjust Styles. Texture and Grain require iOS 27.")
+                    Text("Stylio saves the result to Photos automatically. Open it in Photos → Edit to adjust Styles. Texture and Grain require iOS 27.")
                 }
                 GuideCard("Formats and processing", summary: "Supported formats, HDR, Live Photo and originals.", icon: "square.3.layers.3d", tint: .purple) {
                     Text("Stylio supports HEIC, JPG, PNG, DNG, WebP, GIF, BMP and AVIF. It develops DNG to sRGB HEIC and uses one frame from animated images.")
-                    Text("Use the original HEIC to preserve HDR, Styles and Portrait data. When importing a Live Photo from Files, select its HEIC and matching MOV together. The results screen offers Save Live Photo when the pair is compatible.")
+                    Text("Use the original HEIC to preserve HDR, Styles and Portrait data. When importing a Live Photo from Files, select its HEIC and matching MOV together. Stylio keeps the motion when the processed pair is compatible.")
                 }
                 GuideCard("iPhone 16/17 photos with edited Styles or Portrait", summary: "What Stylio can preserve and what Photos may omit.", icon: "person.crop.rectangle", tint: .orange) {
                     Text("Editing Styles or Portrait in Photos can change what an exported copy contains. Stylio can keep editing data that remains in the file. An original HEIC gives it the most information to work with.")
@@ -28,6 +28,7 @@ struct GuideView: View {
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             }
@@ -64,6 +65,8 @@ private struct GuideCard<Content: View>: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, 12)
         } label: {
             HStack(spacing: 12) {
@@ -77,6 +80,8 @@ private struct GuideCard<Content: View>: View {
                     Text(title).font(.subheadline.weight(.bold)).foregroundStyle(.primary)
                     Text(summary).font(.footnote).foregroundStyle(.secondary)
                 }
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 11)

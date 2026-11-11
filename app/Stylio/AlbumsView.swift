@@ -47,7 +47,7 @@ struct AlbumsView: View {
         .toolbar {
             if !processing.jobs.isEmpty {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Processing Results", systemImage: "tray") { isShowingResults = true }
+                    ProcessingResultsButton { isShowingResults = true }
                 }
             }
         }

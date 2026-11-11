@@ -13,16 +13,17 @@ newer to get the system Liquid Glass appearance on compatible devices.
 
 Open a photo and tap **Add Styles**, or use **Select** and **Process** for a batch.
 The Search tab finds photos by filename, date, album, and media type. On iOS 26
-and later, the Library timeline moves into the system tab bar as it minimizes.
+and later, the Library timeline appears inline when the system tab bar minimizes.
 The Library sort menu also provides the **Year**, **Month**, and **All** views.
-Save the processing results as new assets in Photos.
+Stylio automatically saves processed photos as new assets in Photos. Open the
+tray icon to check progress, share a result, or retry a failed save.
 Stylio bundles the shared JavaScript pipeline from [`web/src/`](../web/src/) and
 runs it in WebKit on the device. The pipeline downloads supported AI models and
 codecs as needed. Settings → On this device manages these downloads and the
 app's local preferences. The update check links to the latest successful iOS
 build on GitHub Actions when it differs from the installed build.
 
-Stylio validates the original HEIC/MOV pairing before offering **Save Live Photo**.
+Stylio validates the original HEIC/MOV pairing before saving a Live Photo.
 If the MOV already has native Styles tracks, Stylio can add the required Texture
 metadata while preserving the existing video and audio samples. The results
 screen explains when a Live Photo can only be saved as a still.
@@ -48,8 +49,8 @@ screen explains when a Live Photo can only be saved as a still.
    for `Palettify-unsigned.ipa`. The artifact is a device build. Xcode and the
    iOS Simulator run on macOS.
 5. Open Library and grant Photos access. Process an original HEIC and a Live
-   Photo from the Live Photos album. Save the results, then open the Live Photo
-   in Photos and verify motion, Styles and Texture in the editor.
+   Photo from the Live Photos album. Check the tray for save status, then open
+   the saved Live Photo in Photos and verify motion, Styles and Texture in the editor.
 
 CI reuses the unsigned IPA for the same source commit, Xcode and SDK. For a
 different commit, it restores compatible Swift package checkouts, compiler and

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct StylioApp: App {
@@ -17,6 +18,7 @@ private struct StylioTabs: View {
     @StateObject private var processing = PhotoProcessing()
     @State private var destination: Destination = .library
     @State private var timeline = LibraryTimeline.all
+    @State private var showsLibraryTimeline = false
     @State private var searchText = ""
     @Environment(\.scenePhase) private var scenePhase
 
@@ -31,8 +33,10 @@ private struct StylioTabs: View {
             }
             .onChange(of: processing.resetCount) { _, _ in
                 timeline = .all
+                showsLibraryTimeline = false
                 searchText = ""
             }
+            .onChange(of: destination) { _, _ in showsLibraryTimeline = false }
     }
 
     @ViewBuilder private var tabs: some View {
@@ -45,7 +49,8 @@ private struct StylioTabs: View {
 
     @available(iOS 26.0, *)
     @ViewBuilder private var glassTabs: some View {
-        let showTimeline = destination == .library && (library.assets?.count ?? 0) > 0
+        let showTimeline = destination == .library && showsLibraryTimeline
+            && UIDevice.current.userInterfaceIdiom == .phone && (library.assets?.count ?? 0) > 0
         let tabs = TabView(selection: $destination) {
             Tab("Library", systemImage: "photo.on.rectangle", value: Destination.library) { libraryTab }
             Tab("Albums", systemImage: "rectangle.stack", value: Destination.albums) { albumsTab }
@@ -59,11 +64,11 @@ private struct StylioTabs: View {
 
         if #available(iOS 26.1, *) {
             tabs.tabViewBottomAccessory(isEnabled: showTimeline) {
-                LibraryTimelineAccessory(timeline: $timeline)
+                LibraryTimelineAccessory(timeline: $timeline, isRequested: $showsLibraryTimeline)
             }
         } else {
             tabs.tabViewBottomAccessory {
-                if showTimeline { LibraryTimelineAccessory(timeline: $timeline) }
+                if showTimeline { LibraryTimelineAccessory(timeline: $timeline, isRequested: $showsLibraryTimeline) }
             }
         }
     }
@@ -83,7 +88,9 @@ private struct StylioTabs: View {
         }
     }
 
-    private var libraryTab: some View { NavigationStack { ProcessView(timeline: $timeline) } }
+    private var libraryTab: some View {
+        NavigationStack { ProcessView(timeline: $timeline, timelineVisibility: $showsLibraryTimeline) }
+    }
     private var albumsTab: some View { NavigationStack { AlbumsView() } }
     private var guideTab: some View { NavigationStack { GuideView() } }
     private var settingsTab: some View { NavigationStack { SettingsView() } }
@@ -93,16 +100,46 @@ private struct StylioTabs: View {
 @available(iOS 26.0, *)
 private struct LibraryTimelineAccessory: View {
     @Binding var timeline: LibraryTimeline
+    @Binding var isRequested: Bool
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selectionHighlight
 
     var body: some View {
-        Picker("Library Timeline", selection: $timeline) {
-            ForEach(LibraryTimeline.allCases, id: \.self) { Text($0.title).tag($0) }
+        Group {
+            if placement == .inline {
+                HStack(spacing: 0) {
+                    ForEach(LibraryTimeline.allCases, id: \.self) { option in
+                        Button {
+                            withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { timeline = option }
+                        } label: {
+                            Text(option.title)
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .frame(maxWidth: .infinity, minHeight: 40)
+                                .background {
+                                    if timeline == option {
+                                        Capsule().fill(Color.primary.opacity(0.14))
+                                            .matchedGeometryEffect(id: "selection", in: selectionHighlight)
+                                    }
+                                }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(timeline == option ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Library Timeline")
+            } else {
+                Color.clear.frame(height: 0).accessibilityHidden(true)
+            }
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 380)
-        .padding(.horizontal, placement == .inline ? 6 : 12)
-        .frame(maxWidth: .infinity)
+        .onChange(of: placement) { previous, current in
+            if previous == .inline && current != .inline { isRequested = false }
+        }
     }
 }
 
