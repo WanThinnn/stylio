@@ -28,7 +28,7 @@ struct GuideView: View {
     private func topic<Content: View>(
         _ title: LocalizedStringKey,
         icon: String,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8, content: content)
