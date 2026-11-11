@@ -57,7 +57,7 @@ struct AlbumsView: View {
     private func rows(_ albums: [PhotoLibrary.Album]) -> some View {
         ForEach(albums) { album in
             NavigationLink {
-                ProcessView(album: album.collection)
+                ProcessView(album: album.collection).toolbar(.hidden, for: .tabBar)
             } label: {
                 Label {
                     LabeledContent(album.title) { Text(album.count, format: .number) }

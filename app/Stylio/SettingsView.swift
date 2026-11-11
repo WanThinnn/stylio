@@ -248,22 +248,53 @@ private struct AISettingsView: View {
                     icon: "cpu",
                     isOn: $gpu
                 )
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Model")
-                    Picker("Model", selection: $model) {
-                        ForEach(Model.allCases, id: \.self) { option in
-                            Text(option.title).tag(option)
-                        }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) {
+                        modelLabel.fixedSize(horizontal: true, vertical: false)
+                        modelSlider.frame(minWidth: 124, idealWidth: 140, maxWidth: 180)
                     }
-                    .pickerStyle(.segmented)
+                    VStack(alignment: .leading, spacing: 8) {
+                        modelLabel
+                        modelSlider
+                    }
                 }
             } header: {
                 Text("Processing Options")
             } footer: {
-                Text("Lite is faster. Pro uses larger models. Your photos stay on your device.")
+                Text("Your photos stay on your device.")
             }
         }
         .navigationTitle("AI Settings")
+    }
+
+    private var modelLabel: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model")
+                Text("Lite is faster. Pro gives finer results.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: 130, alignment: .leading)
+            }
+        } icon: {
+            Image(systemName: "cube.transparent").foregroundStyle(Color.accentColor)
+        }
+    }
+
+    private var modelSlider: some View {
+        let tiers = Model.allCases
+        let position = Binding<Double>(
+            get: { Double(tiers.firstIndex(of: model) ?? 1) },
+            set: { model = tiers[Int($0.rounded())] }
+        )
+        return VStack(spacing: 2) {
+            Text(model.title)
+                .font(.subheadline.weight(.medium))
+                .accessibilityHidden(true)
+            Slider(value: position, in: 0...Double(tiers.count - 1), step: 1)
+                .accessibilityLabel("Model")
+                .accessibilityValue(Text(model.title))
+        }
     }
 
     private var smartEnhance: Binding<Bool> {

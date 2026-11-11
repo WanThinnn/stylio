@@ -1,0 +1,71 @@
+workflows:
+  stylio-ios:
+    name: Stylio iOS unsigned
+    instance_type: mac_mini_m2
+    max_build_duration: 20
+    environment:
+      xcode: '26.6'
+    cache:
+      cache_paths:
+        - ~/Library/Caches/stylio-ios/SourcePackages
+        - ~/Library/Caches/stylio-ios/CompilationCache.noindex
+        - ~/Library/Caches/stylio-ios/ModuleCache.noindex
+    scripts:
+      - name: Build for iPhone and iPad
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          source_sha=$(git rev-parse HEAD)
+          if [[ -n "${STYLIO_EXPECTED_COMMIT:-}" && "$source_sha" != "$STYLIO_EXPECTED_COMMIT" ]]; then
+            printf 'Expected %s but Codemagic checked out %s. Request a new build from the current branch head.\n' \
+              "$STYLIO_EXPECTED_COMMIT" "$source_sha" >&2
+            exit 1
+          fi
+
+          output_dir="$CM_BUILD_DIR/build/stylio-codemagic"
+          cache_dir="$HOME/Library/Caches/stylio-ios"
+          if [[ "${STYLIO_CLEAN_BUILD:-false}" == true ]]; then
+            cache_dir="$output_dir/Uncached"
+          fi
+          mkdir -p "$output_dir" "$cache_dir"
+
+          printf 'Source commit: %s\n' "$source_sha"
+          xcodebuild -version
+          xcodebuild \
+            -project app/Stylio.xcodeproj \
+            -scheme Stylio \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$output_dir/DerivedData" \
+            -clonedSourcePackagesDirPath "$cache_dir/SourcePackages" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -showBuildTimingSummary \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=YES \
+            COMPILATION_CACHE_CAS_PATH="$cache_dir/CompilationCache.noindex" \
+            MODULE_CACHE_DIR="$cache_dir/ModuleCache.noindex" \
+            STYLIO_SOURCE_COMMIT="$source_sha" \
+            build | tee "$output_dir/xcodebuild.log"
+
+      - name: Package and verify unsigned IPA
+        script: |
+          set -euo pipefail
+          output_dir="$CM_BUILD_DIR/build/stylio-codemagic"
+          package_dir="$output_dir/package"
+          app="$output_dir/DerivedData/Build/Products/Release-iphoneos/Stylio.app"
+          mkdir -p "$package_dir/Payload"
+          ditto "$app" "$package_dir/Payload/Stylio.app"
+
+          cd "$package_dir"
+          ipa="$package_dir/Stylio-unsigned.ipa"
+          zip -qry "$ipa" Payload
+          unzip -tq "$ipa"
+          engine=Payload/Stylio.app/StylioEngine
+          for resource in index.html src/app/native-engine.js profiles/index.json live-photo-video/template.mov; do
+            unzip -p "$ipa" "$engine/$resource" > /dev/null
+          done
+          mv "$ipa" "$output_dir/Stylio-unsigned.ipa"
+    artifacts:
+      - build/stylio-codemagic/Stylio-unsigned.ipa
+      - build/stylio-codemagic/xcodebuild.log

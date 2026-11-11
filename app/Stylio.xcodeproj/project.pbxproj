@@ -17,6 +17,7 @@
 		570100000000000000000009 /* AlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000010 /* AlbumsView.swift */; };
 		570100000000000000000010 /* ProcessingResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000011 /* ProcessingResultsView.swift */; };
 		570100000000000000000011 /* FlyingFox in Frameworks */ = {isa = PBXBuildFile; productRef = 570A00000000000000000001 /* FlyingFox */; };
+		570100000000000000000012 /* PhotoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000013 /* PhotoDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		570200000000000000000010 /* AlbumsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumsView.swift; sourceTree = "<group>"; };
 		570200000000000000000011 /* ProcessingResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingResultsView.swift; sourceTree = "<group>"; };
 		570200000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		570200000000000000000013 /* PhotoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +66,7 @@
 				570200000000000000000009 /* PhotoProcessing.swift */,
 				570200000000000000000010 /* AlbumsView.swift */,
 				570200000000000000000011 /* ProcessingResultsView.swift */,
+				570200000000000000000013 /* PhotoDetailView.swift */,
 				570200000000000000000012 /* Info.plist */,
 				570200000000000000000003 /* Assets.xcassets */,
 			);
@@ -155,6 +158,7 @@
 				570100000000000000000008 /* PhotoProcessing.swift in Sources */,
 				570100000000000000000009 /* AlbumsView.swift in Sources */,
 				570100000000000000000010 /* ProcessingResultsView.swift in Sources */,
+				570100000000000000000012 /* PhotoDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

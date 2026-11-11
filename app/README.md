@@ -11,7 +11,10 @@ changes apply to the interface immediately.
 The app targets iPhone and iPad on iOS 17 or later. Build with Xcode 26 or
 newer to get the system Liquid Glass appearance on compatible devices.
 
-Select photos, tap **Process**, then save the results as new assets in Photos.
+Open a photo and tap **Add Styles**, or use **Select** and **Process** for a batch.
+The search button finds photos by filename, date, album, and media type. Scroll
+the Library grid to reveal the **Year**, **Month**, and **All** views. Save the
+processing results as new assets in Photos.
 Stylio bundles the shared JavaScript pipeline from [`web/src/`](../web/src/) and
 runs it in WebKit on the device. The pipeline downloads supported AI models and
 codecs as needed. Settings → On this device manages these downloads and the
@@ -50,6 +53,26 @@ screen explains when a Live Photo can only be saved as a still.
 CI reuses the unsigned IPA for the same source commit, Xcode and SDK. For a
 different commit, it restores compatible Swift package checkouts, compiler and
 module caches and builds the requested revision.
+
+## Build with Codemagic
+
+Commit and push `codemagic.yaml` with the app changes. In the [Stylio app on
+Codemagic](https://codemagic.io/app/6af4c62554bfac27b6820e4c/settings), check for
+the configuration file on the branch you pushed, then start **Stylio iOS
+unsigned**. Download `Stylio-unsigned.ipa` from the completed build's artifacts.
+The workflow runs on request and caches Swift packages and Xcode compilation.
+
+To start the same build from Git Bash, load your Codemagic API token into the
+current shell and run the script with the branch you pushed checked out.
+
+```bash
+read -rsp 'Codemagic API token: ' CODEMAGIC_API_TOKEN; printf '\n'
+export CODEMAGIC_API_TOKEN
+./scripts/build-ios.sh --codemagic --wait
+```
+
+Use `--clean` to bypass cached build data. The script defaults to the Stylio
+Codemagic app above. Set `CODEMAGIC_APP_ID` to use another app.
 
 ## Build on a Mac
 

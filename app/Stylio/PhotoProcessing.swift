@@ -13,7 +13,7 @@ final class PhotoProcessing: ObservableObject {
         var name: String {
             switch self {
             case .photo(let asset):
-                PhotoProcessing.originalPhoto(in: PHAssetResource.assetResources(for: asset))?.originalFilename ?? "Photo"
+                PhotoLibrary.originalPhoto(in: PHAssetResource.assetResources(for: asset))?.originalFilename ?? "Photo"
             case .file(let url, _): url.lastPathComponent
             }
         }
@@ -193,7 +193,7 @@ final class PhotoProcessing: ObservableObject {
         switch input {
         case .photo(let asset):
             let resources = PHAssetResource.assetResources(for: asset)
-            guard let photo = Self.originalPhoto(in: resources) else { throw ProcessingError.photoUnavailable }
+            guard let photo = PhotoLibrary.originalPhoto(in: resources) else { throw ProcessingError.photoUnavailable }
             let still = folder.appendingPathComponent("input").appendingPathExtension(URL(fileURLWithPath: photo.originalFilename).pathExtension)
             try await write(photo, to: still)
             let movie = asset.mediaSubtypes.contains(.photoLive) ? resources.first { $0.type == .pairedVideo } : nil
@@ -207,10 +207,6 @@ final class PhotoProcessing: ObservableObject {
             }.value
             return ProcessingFiles(input: still, movie: movie == nil ? nil : movieDestination, movieOutput: movieOutput, output: output)
         }
-    }
-
-    private nonisolated static func originalPhoto(in resources: [PHAssetResource]) -> PHAssetResource? {
-        resources.first { $0.type == .photo } ?? resources.first { $0.type == .fullSizePhoto }
     }
 
     private func write(_ resource: PHAssetResource, to destination: URL) async throws {
