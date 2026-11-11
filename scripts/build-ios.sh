@@ -40,7 +40,7 @@ revision=$(git -C "$repo_root" rev-parse --verify HEAD) || fail 'Commit the sour
 git -C "$repo_root" cat-file -e "$revision:app/Stylio.xcodeproj/project.pbxproj" 2>/dev/null ||
     fail 'Commit the iOS project before requesting a build.'
 
-changes=$(git -C "$repo_root" status --porcelain -- app .github/workflows/ios-build.yml)
+changes=$(git -C "$repo_root" status --porcelain -- app web/src web/profiles web/vendor web/THIRD_PARTY_NOTICES.txt .github/workflows/ios-build.yml)
 if [[ -n "$changes" ]]; then
     printf 'Warning: this build uses committed HEAD. Local iOS changes are excluded.\n' >&2
 fi
@@ -73,7 +73,7 @@ fi
 
 for ((attempt = 0; attempt < 30; attempt++)); do
     run_id=$(gh run list --repo "$repository" --workflow ios-build.yml --event repository_dispatch --limit 20 \
-        --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"$run_title\") | .databaseId") ||
+        --json databaseId,displayTitle --jq ".[] | select(.displayTitle == \"$run_title $revision\" or .displayTitle == \"$run_title\") | .databaseId") ||
         fail 'The build was requested. Check its status in GitHub Actions.'
     if [[ -n "$run_id" ]]; then
         printf '%s/runs/%s\n' "$actions_url" "$run_id"

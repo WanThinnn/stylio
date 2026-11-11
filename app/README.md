@@ -1,9 +1,9 @@
 # Stylio for iOS
 
-Stylio uses SwiftUI and system controls for the Process, History, Guide and
-Settings tabs. Process opens a PhotoKit library grid, newest photos first, with
-Live Photo indicators and tap-to-select. It shows every photo shared with Stylio.
-The Library Options menu also supports importing originals from Files.
+Stylio uses SwiftUI for Library, Albums, Guide and Settings. Library shows the
+photos shared with Stylio. Albums includes personal albums and system albums
+such as Favorites and Live Photos. The Library Options menu imports original
+images or HEIC/MOV pairs from Files.
 
 Settings → AI Settings contains Smart Enhance, the individual effects, GPU
 acceleration and the model tier. These preferences are saved locally. Appearance
@@ -11,10 +11,17 @@ changes apply to the interface immediately.
 The app targets iPhone and iPad on iOS 17 or later. Build with Xcode 26 or
 newer to get the system Liquid Glass appearance on compatible devices.
 
-The shared JavaScript pipeline lives under [`web/src/`](../web/src/). The
-WebKit bridge, Live Photo MOV processing and PhotoKit export are pending, so
-this build is for browsing, selection and settings. History shows its empty
-state until the app produces processing results.
+Select photos, tap **Process**, then save the results as new assets in Photos.
+Stylio bundles the shared JavaScript pipeline from [`web/src/`](../web/src/) and
+runs it in WebKit on the device. The pipeline downloads supported AI models and
+codecs as needed. Settings → On this device manages these downloads and the
+app's local preferences. The update check links to the latest successful iOS
+build on GitHub Actions when it differs from the installed build.
+
+Stylio validates the original HEIC/MOV pairing before offering **Save Live Photo**.
+If the MOV already has native Styles tracks, Stylio can add the required Texture
+metadata while preserving the existing video and audio samples. The results
+screen explains when a Live Photo can only be saved as a still.
 
 ## Build from Windows and test on an iPhone
 
@@ -36,14 +43,13 @@ state until the app produces processing results.
 4. Sign and sideload the IPA onto your iPhone using the same workflow you use
    for `Palettify-unsigned.ipa`. The artifact is a device build. Xcode and the
    iOS Simulator run on macOS.
-5. Open Process and grant Photos access. Check the library grid, Live Photo
-   indicator, selection and limited-access behavior. Try an HEIC and MOV from
-   Library Options → Import from Files. In Settings, change appearance and
-   reopen the app to check that the AI preferences persist.
+5. Open Library and grant Photos access. Process an original HEIC and a Live
+   Photo from the Live Photos album. Save the results, then open the Live Photo
+   in Photos and verify motion, Styles and Texture in the editor.
 
-CI reuses the unsigned IPA when the iOS project, sources and assets are
-unchanged on the same Xcode and SDK. When Swift sources change, it restores
-compatible Xcode compiler and module caches and builds the requested revision.
+CI reuses the unsigned IPA for the same source commit, Xcode and SDK. For a
+different commit, it restores compatible Swift package checkouts, compiler and
+module caches and builds the requested revision.
 
 ## Build on a Mac
 

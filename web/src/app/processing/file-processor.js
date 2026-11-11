@@ -13,7 +13,7 @@ import {releaseHevcEncoder as releaseRasterEncoder} from '../../raster/ffmpeg-he
 import {readImageFile,addTextureInWorker,repairTextureInWorker,restoreNativePortraitInWorker,legacyCompatibilityInWorker,patchInWorker,releaseHeicProcessor} from '../../media/heic-processing.js';
 import {waitForVisiblePage} from '../../ui/processing-scheduler.js';
 import {shouldRenderStyleDisplay} from '../../recommend/style-display-render.js';
-export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis,acquireProcessingSlot,releaseIdleModels}){
+export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcceleration,selectedAiLevel,handleMovie,liveMovies,livePhotos,attachMovie,ensureProfileIndex,getProfile,tryAiPortrait,analysis,acquireProcessingSlot,releaseIdleModels,packageLivePhotos=true}){
     const {addMissingSoftSkin,ensureDecode,stagePercent,modelDownloadStatus,styleProgress,styleResultNote,adaptiveStyleCompletionNotice,recommendHeicStyle}=analysis;
   async function handleFile(file,preparedUi=null) {
     const ui = preparedUi||row(file.name,file);
@@ -428,7 +428,7 @@ export function createFileProcessor({row,T,getLanguage,aiText,aiFeatures,gpuAcce
         ...(date?.timestamp !== undefined ? {lastModified:date.timestamp} : {}) });
       showCaptureDate(ui, date);
       await ui.metadata(data, inputSize);overall(88);
-      if (liveIdentifier) {
+      if (liveIdentifier && packageLivePhotos) {
         ui.note(T("live.waitmovie"));
         const exporter=createLivePhotoExport(bytes,{
           onReady({data:zip,name}){

@@ -12,6 +12,11 @@
 		570100000000000000000004 /* PhotoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000005 /* PhotoLibrary.swift */; };
 		570100000000000000000005 /* GuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000006 /* GuideView.swift */; };
 		570100000000000000000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000007 /* SettingsView.swift */; };
+		570100000000000000000007 /* NativeEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000008 /* NativeEngine.swift */; };
+		570100000000000000000008 /* PhotoProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000009 /* PhotoProcessing.swift */; };
+		570100000000000000000009 /* AlbumsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000010 /* AlbumsView.swift */; };
+		570100000000000000000010 /* ProcessingResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570200000000000000000011 /* ProcessingResultsView.swift */; };
+		570100000000000000000011 /* FlyingFox in Frameworks */ = {isa = PBXBuildFile; productRef = 570A00000000000000000001 /* FlyingFox */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,13 +27,18 @@
 		570200000000000000000005 /* PhotoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrary.swift; sourceTree = "<group>"; };
 		570200000000000000000006 /* GuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideView.swift; sourceTree = "<group>"; };
 		570200000000000000000007 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		570200000000000000000008 /* NativeEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEngine.swift; sourceTree = "<group>"; };
+		570200000000000000000009 /* PhotoProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoProcessing.swift; sourceTree = "<group>"; };
+		570200000000000000000010 /* AlbumsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumsView.swift; sourceTree = "<group>"; };
+		570200000000000000000011 /* ProcessingResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingResultsView.swift; sourceTree = "<group>"; };
+		570200000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		570300000000000000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (570100000000000000000011 /* FlyingFox in Frameworks */,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -50,6 +60,11 @@
 				570200000000000000000005 /* PhotoLibrary.swift */,
 				570200000000000000000006 /* GuideView.swift */,
 				570200000000000000000007 /* SettingsView.swift */,
+				570200000000000000000008 /* NativeEngine.swift */,
+				570200000000000000000009 /* PhotoProcessing.swift */,
+				570200000000000000000010 /* AlbumsView.swift */,
+				570200000000000000000011 /* ProcessingResultsView.swift */,
+				570200000000000000000012 /* Info.plist */,
 				570200000000000000000003 /* Assets.xcassets */,
 			);
 			path = Stylio;
@@ -71,10 +86,12 @@
 				570300000000000000000001 /* Sources */,
 				570300000000000000000002 /* Frameworks */,
 				570300000000000000000003 /* Resources */,
+				570300000000000000000004 /* Bundle shared JavaScript engine */,
 			);
 			buildRules = ();
 			dependencies = ();
 			name = Stylio;
+			packageProductDependencies = (570A00000000000000000001 /* FlyingFox */,);
 			productName = Stylio;
 			productReference = 570200000000000000000004 /* Stylio.app */;
 			productType = "com.apple.product-type.application";
@@ -94,6 +111,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (en, Base,);
 			mainGroup = 570400000000000000000001;
+			packageReferences = (570900000000000000000001 /* XCRemoteSwiftPackageReference "FlyingFox" */,);
 			productRefGroup = 570400000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -110,6 +128,19 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		570300000000000000000004 /* Bundle shared JavaScript engine */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			name = "Bundle shared JavaScript engine";
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "bash \"$SRCROOT/prepare-engine.sh\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/StylioEngine\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		570300000000000000000001 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -120,6 +151,10 @@
 				570100000000000000000004 /* PhotoLibrary.swift in Sources */,
 				570100000000000000000005 /* GuideView.swift in Sources */,
 				570100000000000000000006 /* SettingsView.swift in Sources */,
+				570100000000000000000007 /* NativeEngine.swift in Sources */,
+				570100000000000000000008 /* PhotoProcessing.swift in Sources */,
+				570100000000000000000009 /* AlbumsView.swift in Sources */,
+				570100000000000000000010 /* ProcessingResultsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -155,7 +190,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Stylio/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stylio;
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Stylio displays your photo library so you can select photos to process on this device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -179,7 +216,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Stylio/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Stylio;
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Stylio displays your photo library so you can select photos to process on this device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -212,6 +251,22 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		570900000000000000000001 /* XCRemoteSwiftPackageReference "FlyingFox" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/swhitty/FlyingFox.git";
+			requirement = {kind = exactVersion; version = 0.27.1;};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		570A00000000000000000001 /* FlyingFox */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 570900000000000000000001 /* XCRemoteSwiftPackageReference "FlyingFox" */;
+			productName = FlyingFox;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 570600000000000000000001 /* Project object */;
 }

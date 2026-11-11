@@ -1,5 +1,5 @@
 name: Stylio iOS build
-run-name: Stylio iOS - ${{ github.event.client_payload.request_id }}
+run-name: Stylio iOS - ${{ github.event.client_payload.request_id }} ${{ github.event.client_payload.sha }}
 
 on:
   repository_dispatch:
@@ -37,14 +37,21 @@ jobs:
           toolchain_id=$(printf '%s\n%s\n' "$xcode_version" "$sdk_version" | shasum -a 256 | cut -d' ' -f1)
           echo "id=$toolchain_id" >> "$GITHUB_OUTPUT"
 
-      # Only restore a packaged build for identical project files, sources and assets.
+      # The IPA embeds the requested source commit for the in-app update check.
       - name: Cache the unsigned IPA
         id: ipa
         if: github.event.client_payload.clean != true
         uses: actions/cache@v5
         with:
           path: ${{ runner.temp }}/stylio-artifacts/Stylio-unsigned.ipa
-          key: stylio-ipa-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('app/Stylio.xcodeproj/**', 'app/Stylio/**') }}
+          key: stylio-ipa-v2-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ github.event.client_payload.sha }}
+
+      - name: Cache Swift package checkouts
+        if: github.event.client_payload.clean != true && steps.ipa.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/stylio-packages
+          key: stylio-swift-packages-v1-${{ runner.arch }}-${{ hashFiles('app/Stylio.xcodeproj/**/Package.resolved') }}
 
       - name: Cache Xcode compilation and modules
         if: github.event.client_payload.clean != true && steps.ipa.outputs.cache-hit != 'true'
@@ -59,6 +66,8 @@ jobs:
 
       - name: Build for iPhone and iPad
         if: steps.ipa.outputs.cache-hit != 'true'
+        env:
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
         run: |
           xcodebuild \
             -project app/Stylio.xcodeproj \
@@ -66,12 +75,14 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/stylio-build" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/stylio-packages" \
             -showBuildTimingSummary \
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             COMPILATION_CACHE_ENABLE_CACHING=YES \
             COMPILATION_CACHE_CAS_PATH="$RUNNER_TEMP/stylio-build/CompilationCache.noindex" \
             MODULE_CACHE_DIR="$RUNNER_TEMP/stylio-build/ModuleCache.noindex" \
+            STYLIO_SOURCE_COMMIT="$SOURCE_SHA" \
             build
 
       - name: Package unsigned IPA
@@ -84,7 +95,12 @@ jobs:
           zip -qry "$RUNNER_TEMP/stylio-artifacts/Stylio-unsigned.ipa" Payload
 
       - name: Verify IPA
-        run: unzip -tq "$RUNNER_TEMP/stylio-artifacts/Stylio-unsigned.ipa"
+        run: |
+          ipa="$RUNNER_TEMP/stylio-artifacts/Stylio-unsigned.ipa"
+          unzip -tq "$ipa"
+          engine=Payload/Stylio.app/StylioEngine
+          unzip -p "$ipa" "$engine/index.html" "$engine/src/app/native-engine.js" \
+            "$engine/profiles/index.json" "$engine/live-photo-video/template.mov" > /dev/null
 
       - name: Upload device build
         uses: actions/upload-artifact@v4

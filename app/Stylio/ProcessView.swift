@@ -6,28 +6,40 @@ import UniformTypeIdentifiers
 
 struct ProcessView: View {
     @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var library = PhotoLibrary()
+    @EnvironmentObject private var library: PhotoLibrary
+    @EnvironmentObject private var processing: PhotoProcessing
     @State private var files: [URL] = []
     @State private var isImportingFiles = false
     @State private var importError: String?
+    @State private var isShowingResults = false
+    @State private var albumAssets: PHFetchResult<PHAsset>?
+    var album: PHAssetCollection? = nil
 
     var body: some View {
         libraryContent
-            .navigationTitle("Library")
+            .navigationTitle(album?.localizedTitle ?? "Library")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Import from Files", systemImage: "folder") {
-                            isImportingFiles = true
-                        }
-                        if library.authorization == .limited {
-                            Button("Manage Photos Access", systemImage: "lock") {
-                                openAppSettings()
+                    if !processing.jobs.isEmpty {
+                        Button("Processing Results", systemImage: "tray") { isShowingResults = true }
+                    }
+                }
+                if album == nil || library.authorization == .limited {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            if album == nil {
+                                Button("Import from Files", systemImage: "folder") {
+                                    isImportingFiles = true
+                                }
                             }
+                            if library.authorization == .limited {
+                                Button("Manage Photos Access", systemImage: "lock") {
+                                    openAppSettings()
+                                }
+                            }
+                        } label: {
+                            Label("Library Options", systemImage: "ellipsis.circle")
                         }
-                    } label: {
-                        Label("Library Options", systemImage: "ellipsis.circle")
                     }
                 }
             }
@@ -36,10 +48,15 @@ struct ProcessView: View {
                     selectionBar
                 }
             }
-            .task { await library.requestAccessIfNeeded() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { library.refresh() }
+            .onReceive(library.$assets) { assets in
+                if let album, assets != nil {
+                    albumAssets = PHAsset.fetchAssets(in: album, options: PhotoLibrary.photoOptions())
+                } else {
+                    albumAssets = nil
+                }
             }
+            .onChange(of: processing.resetCount) { _, _ in files = [] }
+            .sheet(isPresented: $isShowingResults) { ProcessingResultsView() }
             .fileImporter(
                 isPresented: $isImportingFiles,
                 allowedContentTypes: [.image, .rawImage, .quickTimeMovie],
@@ -50,7 +67,7 @@ struct ProcessView: View {
                 case .failure(let error): importError = error.localizedDescription
                 }
             }
-            .alert("Couldn’t select files", isPresented: showsImportError, presenting: importError) { _ in
+            .alert("Couldn’t continue", isPresented: showsImportError, presenting: importError) { _ in
                 Button("OK", role: .cancel) { importError = nil }
             } message: { error in
                 Text(error)
@@ -61,10 +78,10 @@ struct ProcessView: View {
     private var libraryContent: some View {
         switch library.authorization {
         case .authorized, .limited:
-            if let assets = library.assets {
+            if let assets = album == nil ? library.assets : albumAssets {
                 if assets.count > 0 {
                     photoGrid(assets)
-                } else if library.authorization == .limited {
+                } else if library.authorization == .limited && album == nil {
                     accessMessage("No Photos Shared", description: "Manage Photos access to add photos to this library.")
                 } else {
                     ContentUnavailableView("No Photos", systemImage: "photo.on.rectangle")
@@ -135,6 +152,9 @@ struct ProcessView: View {
                     library.clearSelection()
                     files = []
                 }
+                Button("Process", action: processSelection)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(processing.isBusy)
             }
         }
         .padding(.horizontal, 16)
@@ -163,6 +183,17 @@ struct ProcessView: View {
     private func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         openURL(url)
+    }
+
+    private func processSelection() {
+        do {
+            try processing.start(assets: library.selectedAssets(), files: files)
+            library.clearSelection()
+            files = []
+            isShowingResults = true
+        } catch {
+            importError = error.localizedDescription
+        }
     }
 }
 

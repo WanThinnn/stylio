@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {box,concat,be} from '../../web/src/core/box.js';
-import {photoContentIdentifier,moviePairingMetadata,validateLivePair,livePhotoPackage,createLivePhotoExport} from '../../web/src/media/live-photo.js';
+import {box,boxes,concat,be,u} from '../../web/src/core/box.js';
+import {photoContentIdentifier,moviePairingMetadata,movieStyleTracks,validateLivePair,livePhotoPackage,createLivePhotoExport} from '../../web/src/media/live-photo.js';
+import {addMovieTexture} from '../../web/src/media/native-movie-texture.js';
+import {createNativeEngine,livePhotoDisposition} from '../../web/src/app/native-engine.js';
+import {executeJob} from '../../web/src/media/heic-worker.js';
 import {readZip} from '../../web/src/core/zip.js';
 import {addTexture} from '../../web/src/styles/texture.js';
 import {discoverHeic, extractItem} from '../../web/src/core/heif.js';
@@ -42,6 +45,76 @@ test('MOV parser reads ISO and QuickTime metadata; rejects malformed box sizes',
     {contentIdentifier:'test-identifier',hasStillImageTimeKey:true});
   assert.throws(()=>moviePairingMetadata(new Uint8Array([0,0,0,99,109,111,111,118])),/Invalid MOV/);
   assert.throws(()=>moviePairingMetadata(box('mdat',txt('com.apple.quicktime.content.identifier'))),/no movie metadata/);
+});
+
+test('native export can add the donor Texture track while keeping the paired video and still-image-time intact',()=>{
+  const donor=new Uint8Array(fs.readFileSync(new URL('../../app/engine/live-photo-video/template.mov',import.meta.url)));
+  const id='native-live-identifier',source=pairedPhoto(id),output=addTexture(source).data;
+  const pair=movie(id,false).subarray(8);
+  const prefix=concat([box('ftyp',txt('qt  ')),box('mdat',Uint8Array.of(91,92,93))]);
+  const fields=(...values)=>concat(values.map(value=>be(value,4)));
+  const tracks=['video-map.smart-style-linear-thumbnail','video-map.sky','video-map.person','video-map.skin','smartstyle-info'];
+  const track=(trackID,handler,payload)=>box('trak',concat([
+    box('tkhd',fields(0,0,0,trackID,0,3000)),
+    box('mdia',concat([box('hdlr',concat([fields(0,0),txt(handler)])),...payload])),
+  ]));
+  const video=track(1,'vide',[box('mdhd',fields(0,0,0,1000,3000)),
+    box('minf',box('stbl',box('stts',fields(0,1,3,1000))))]);
+  // Give the synthetic still-image-time track a header so every track has an ID.
+  const [meta,timed]=[...boxes(pair,0,pair.length)];
+  const timedTrack=track(2,'meta',[box('free',pair.subarray(timed.off+8,timed.off+timed.size))]);
+  const original=concat([prefix,box('moov',concat([
+    box('mvhd',fields(0,8)),video,timedTrack,pair.subarray(meta.off,meta.off+meta.size),
+    ...tracks.map((tag,i)=>track(i+3,'auxv',[box('free',txt('com.apple.quicktime.'+tag))])),
+  ]))]);
+  assert.equal(livePhotoDisposition(source,source,original),'compatible');
+  assert.equal(livePhotoDisposition(source,output,movie(id)),'needs-tracks');
+  assert.equal(livePhotoDisposition(source,output,movie('different-identifier')),'mismatch');
+  assert.equal(livePhotoDisposition(source,output,original),'needs-texture');
+  const patched=addMovieTexture(original,donor);
+  assert.deepEqual(patched.subarray(0,prefix.length),prefix);
+  assert.deepEqual(moviePairingMetadata(patched),moviePairingMetadata(original));
+  assert.deepEqual(movieStyleTracks(patched),{styles:true,texture:true});
+  assert.equal(livePhotoDisposition(source,output,patched),'compatible');
+  const [, ,moov,newMedia]=[...boxes(patched,0,patched.length)];
+  const members=[...boxes(patched,moov.off+moov.hdr,moov.off+moov.size)];
+  assert.deepEqual(patched.subarray(members[1].off,members[1].off+members[1].size),video);
+  assert.deepEqual(patched.subarray(members[2].off,members[2].off+members[2].size),timedTrack);
+  const trackOffset=members.at(-1).off;
+  const textureTrack=Buffer.from(patched.subarray(trackOffset,newMedia.off));
+  const offset=trackOffset+textureTrack.indexOf('stco');
+  assert.equal(u(patched,offset+12,4),newMedia.off+newMedia.hdr);
+  assert.throws(()=>addMovieTexture(concat([original,box('free',new Uint8Array(0))]),donor),/layout/);
+});
+
+test('native engine publishes the shared HEIC result through the file bridge',async t=>{
+  const source=pairedPhoto('native-engine-identifier'),updates=[];
+  let output;
+  t.mock.method(globalThis,'fetch',async (path,options)=>{
+    if(path==='/jobs/test/input')return new Response(source);
+    if(path==='/jobs/test/output'){
+      assert.equal(options.method,'POST');
+      assert.equal(options.headers['X-Stylio-Result'],'1');
+      output=new Uint8Array(await options.body.arrayBuffer());
+      return new Response();
+    }
+    throw Error(`Unexpected fetch ${path}`);
+  });
+  const originalWorker=globalThis.Worker;
+  t.after(()=>{if(originalWorker)globalThis.Worker=originalWorker;else delete globalThis.Worker;});
+  globalThis.Worker=class {
+    postMessage({id,...job}){
+      executeJob(job).then(result=>this.onmessage({data:{id,result}}),error=>this.onmessage({data:{id,error:error.message}}));
+    }
+    terminate(){}
+  };
+  const result=await createNativeEngine(event=>updates.push(event)).process({
+    route:'/jobs/test',name:'original.HEIC',paired:false,
+  });
+  assert.match(result.name,/\.heic$/i);
+  assert.equal(result.movie,'none');
+  assert.equal(photoContentIdentifier(output),'native-engine-identifier');
+  assert.ok(updates.some(event=>event.progress===100));
 });
 
 test('Live Photo ZIP follows final Portrait, focus updates and toggle restoration; late MOV also pairs',async()=>{

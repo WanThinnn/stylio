@@ -11,33 +11,28 @@ struct StylioApp: App {
 
 private struct StylioTabs: View {
     private enum Destination: Hashable {
-        case process, history, guide, settings
+        case library, albums, guide, settings
     }
 
     @AppStorage("stylio.appearance") private var appearance: AppAppearance = .system
-    @State private var destination: Destination = .process
+    @StateObject private var library = PhotoLibrary()
+    @StateObject private var processing = PhotoProcessing()
+    @State private var destination: Destination = .library
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $destination) {
             NavigationStack {
                 ProcessView()
             }
-            .tabItem { Label("Process", systemImage: "photo") }
-            .tag(Destination.process)
+            .tabItem { Label("Library", systemImage: "photo.on.rectangle") }
+            .tag(Destination.library)
 
             NavigationStack {
-                ContentUnavailableView {
-                    Label("No processed photos", systemImage: "clock")
-                } description: {
-                    Text("Your processed photos will appear here.")
-                } actions: {
-                    Button("Open Library") { destination = .process }
-                        .buttonStyle(.borderedProminent)
-                }
-                .navigationTitle("History")
+                AlbumsView()
             }
-            .tabItem { Label("History", systemImage: "clock") }
-            .tag(Destination.history)
+            .tabItem { Label("Albums", systemImage: "rectangle.stack") }
+            .tag(Destination.albums)
 
             NavigationStack {
                 GuideView()
@@ -51,6 +46,13 @@ private struct StylioTabs: View {
             .tabItem { Label("Settings", systemImage: "gearshape") }
             .tag(Destination.settings)
         }
+        .environmentObject(library)
+        .environmentObject(processing)
         .preferredColorScheme(appearance.colorScheme)
+        .task { await library.requestAccessIfNeeded() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { library.refresh() }
+        }
+        .onChange(of: processing.resetCount) { _, _ in library.clearSelection() }
     }
 }

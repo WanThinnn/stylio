@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v259`;
+const CACHE_NAME = `${CACHE_PREFIX}v260`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -43,6 +43,7 @@ const APP_SHELL = [
   "./src/app/processing/photo-analysis.js",
   "./src/app/processing/profiles.js",
   "./src/media/live-photo-session.js",
+  "./src/app/native-engine.js",
   "./src/app/processing/file-processor.js",
   "./src/app/application.js",
   "./src/core/gain-map.js",
@@ -175,6 +176,7 @@ const APP_SHELL = [
   "./src/media/image-format.js",
   "./src/codecs/linear-thumbnail.js",
   "./src/media/live-photo.js",
+  "./src/media/native-movie-texture.js",
   "./src/core/model-download.js",
   "./src/app/processing/portrait-progress.js",
   "./src/styles/port.js",

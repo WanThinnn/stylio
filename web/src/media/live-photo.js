@@ -25,6 +25,17 @@ function boxes(bytes,start=0,end=bytes.length) {
   }
   return out;
 }
+export function movieStyleTracks(bytes) {
+  const moov=boxes(bytes).find(box=>box.type==='moov');
+  if(!moov)throw Error('MOV has no movie metadata');
+  const tracks=boxes(bytes,moov.start,moov.end)
+    .filter(box=>box.type==='trak').map(box=>decode(bytes.subarray(box.start,box.end)));
+  const has=tag=>tracks.some(track=>track.includes(`com.apple.quicktime.${tag}`));
+  return {
+    styles:['video-map.smart-style-linear-thumbnail','video-map.sky','video-map.person','video-map.skin','smartstyle-info'].every(has),
+    texture:has('texturestyle-info'),
+  };
+}
 export function moviePairingMetadata(bytes) {
   const moov=boxes(bytes).find(b=>b.type==='moov');
   if(!moov)throw Error('MOV has no movie metadata');
