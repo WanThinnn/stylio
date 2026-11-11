@@ -248,16 +248,7 @@ private struct AISettingsView: View {
                     icon: "cpu",
                     isOn: $gpu
                 )
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 16) {
-                        modelLabel.fixedSize(horizontal: true, vertical: false)
-                        modelSlider.frame(minWidth: 124, idealWidth: 140, maxWidth: 180)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        modelLabel
-                        modelSlider
-                    }
-                }
+                modelRow
             } header: {
                 Text("Processing Options")
             } footer: {
@@ -267,34 +258,36 @@ private struct AISettingsView: View {
         .navigationTitle("AI Settings")
     }
 
-    private var modelLabel: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Model")
-                Text("Lite is faster. Pro gives finer results.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: 130, alignment: .leading)
-            }
-        } icon: {
-            Image(systemName: "cube.transparent").foregroundStyle(Color.accentColor)
-        }
-    }
-
-    private var modelSlider: some View {
+    private var modelRow: some View {
         let tiers = Model.allCases
         let position = Binding<Double>(
             get: { Double(tiers.firstIndex(of: model) ?? 1) },
             set: { model = tiers[Int($0.rounded())] }
         )
-        return VStack(spacing: 2) {
-            Text(model.title)
-                .font(.subheadline.weight(.medium))
-                .accessibilityHidden(true)
+        return VStack(alignment: .leading, spacing: 6) {
+            LabeledContent {
+                Text(model.title)
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityHidden(true)
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Model")
+                        Text("Lite is faster. Pro gives finer results.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "cube.transparent").foregroundStyle(Color.accentColor)
+                }
+            }
             Slider(value: position, in: 0...Double(tiers.count - 1), step: 1)
+                .frame(height: 44)
                 .accessibilityLabel("Model")
                 .accessibilityValue(Text(model.title))
         }
+        .padding(.vertical, 4)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var smartEnhance: Binding<Bool> {

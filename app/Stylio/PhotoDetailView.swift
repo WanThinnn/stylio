@@ -13,8 +13,10 @@ struct PhotoDetailSelection: Identifiable {
 
 struct PhotoDetailView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var processing: PhotoProcessing
     @State private var index: Int
+    @State private var pageIndex: Int?
     @State private var filename = ""
     @State private var isFavorite = false
     @State private var changingFavorite = false
@@ -26,54 +28,23 @@ struct PhotoDetailView: View {
     @State private var liveToken: UUID?
 
     private let photos: PhotoAssets
+    private let onPageChange: (String) -> Void
     private var asset: PHAsset { photos[index] }
     private var isLive: Bool { asset.mediaSubtypes.contains(.photoLive) }
     private var filmstripIndices: Range<Int> { max(0, index - 12)..<min(photos.count, index + 13) }
 
-    init(selection: PhotoDetailSelection) {
+    init(selection: PhotoDetailSelection, onPageChange: @escaping (String) -> Void) {
         photos = selection.photos
+        self.onPageChange = onPageChange
         _index = State(initialValue: selection.index)
+        _pageIndex = State(initialValue: selection.index)
     }
 
     var body: some View {
         VStack(spacing: 10) {
             header
             GeometryReader { geometry in
-                ZStack(alignment: .topLeading) {
-                    PhotoThumbnail(asset: asset, size: geometry.size, contentMode: .aspectFit)
-                        .id(asset.localIdentifier)
-                    if let livePhoto {
-                        LivePhotoPlayback(photo: livePhoto)
-                    }
-                    if isLive {
-                        Button { playLivePhoto(size: geometry.size) } label: {
-                            Label("Live", systemImage: "livephoto")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 10)
-                                .frame(minHeight: 36)
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .stylioGlass(in: Capsule())
-                        .accessibilityLabel("Play Live Photo")
-                        .disabled(liveToken != nil)
-                        .padding(12)
-                    }
-                }
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .contentShape(Rectangle())
-                .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { value in
-                    let movement = value.predictedEndTranslation
-                    guard abs(movement.width) > 44, abs(movement.width) > abs(movement.height) * 1.5 else { return }
-                    choose(index + (movement.width < 0 ? 1 : -1))
-                })
-                .accessibilityAdjustableAction { direction in
-                    switch direction {
-                    case .increment: choose(index + 1)
-                    case .decrement: choose(index - 1)
-                    @unknown default: break
-                    }
-                }
+                photoPager(size: geometry.size)
             }
             if photos.count > 1 { filmstrip }
             actions
@@ -83,11 +54,62 @@ struct PhotoDetailView: View {
         .preferredColorScheme(.dark)
         .onAppear { updatePhoto() }
         .onDisappear { stopLivePhoto() }
+        .onChange(of: pageIndex) { _, position in
+            guard let position, (0..<photos.count).contains(position), position != index else { return }
+            stopLivePhoto()
+            index = position
+            updatePhoto()
+            onPageChange(asset.localIdentifier)
+        }
         .sheet(isPresented: $showsInfo) { infoSheet }
         .sheet(isPresented: $showsResults) { ProcessingResultsView() }
         .alert("Photo", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK", role: .cancel) { error = nil }
         } message: { Text(error ?? "") }
+    }
+
+    private func photoPager(size: CGSize) -> some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(0..<photos.count, id: \.self) { position in
+                    ZStack {
+                        PhotoThumbnail(asset: photos[position], size: size, contentMode: .aspectFit)
+                        if position == index, let livePhoto {
+                            LivePhotoPlayback(photo: livePhoto).allowsHitTesting(false)
+                        }
+                    }
+                    .frame(width: size.width, height: size.height)
+                    .id(position)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollIndicators(.hidden)
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $pageIndex)
+        .overlay(alignment: .topLeading) {
+            if isLive {
+                Button { playLivePhoto(size: size) } label: {
+                    Label("Live", systemImage: "livephoto")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 36)
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .stylioGlass(in: Capsule())
+                .accessibilityLabel("Play Live Photo")
+                .disabled(liveToken != nil)
+                .padding(12)
+            }
+        }
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: choose(index + 1)
+            case .decrement: choose(index - 1)
+            @unknown default: break
+            }
+        }
     }
 
     private var header: some View {
@@ -153,8 +175,7 @@ struct PhotoDetailView: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
-            Button("Add Styles", systemImage: "camera.filters", action: processPhoto)
-                .buttonStyle(.borderedProminent)
+            addStylesButton
                 .buttonBorderShape(.capsule)
                 .controlSize(.large)
                 .disabled(processing.isBusy)
@@ -181,6 +202,15 @@ struct PhotoDetailView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 6)
             .stylioGlass(in: Capsule())
+        }
+    }
+
+    @ViewBuilder private var addStylesButton: some View {
+        let button = Button("Add Styles", systemImage: "camera.filters", action: processPhoto)
+        if #available(iOS 26.0, *) {
+            button.buttonStyle(.glassProminent)
+        } else {
+            button.buttonStyle(.borderedProminent)
         }
     }
 
@@ -223,9 +253,7 @@ struct PhotoDetailView: View {
 
     private func choose(_ position: Int) {
         guard position >= 0, position < photos.count, position != index else { return }
-        stopLivePhoto()
-        index = position
-        updatePhoto()
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { pageIndex = position }
     }
 
     private func updatePhoto() {

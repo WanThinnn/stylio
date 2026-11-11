@@ -21,13 +21,12 @@ enum LibraryTimeline: String, CaseIterable {
 }
 
 struct ProcessView: View {
-    var album: PHAssetCollection? = nil
-    var isSearch = false
+    let album: PHAssetCollection?
+    let isSearch: Bool
     @Binding var timeline: LibraryTimeline
-    @Binding var compactDock: Bool
+    @Binding private var query: String
 
     @Environment(\.openURL) private var openURL
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: PhotoLibrary
     @EnvironmentObject private var processing: PhotoProcessing
     @AppStorage("stylio.library.sort") private var sort = LibrarySort.captured
@@ -42,16 +41,15 @@ struct ProcessView: View {
     @State private var error: String?
     @State private var showsResults = false
     @State private var detail: PhotoDetailSelection?
-    @State private var query = ""
-    @State private var searchActive = false
+    @State private var detailZoomID: String?
     @State private var matches: SearchResult?
+    @Namespace private var photoTransition
 
-    init(album: PHAssetCollection? = nil, isSearch: Bool = false,
-         timeline: Binding<LibraryTimeline> = .constant(.all), compactDock: Binding<Bool> = .constant(false)) {
+    init(album: PHAssetCollection? = nil, timeline: Binding<LibraryTimeline> = .constant(.all), searchText: Binding<String>? = nil) {
         self.album = album
-        self.isSearch = isSearch
+        isSearch = searchText != nil
         _timeline = timeline
-        _compactDock = compactDock
+        _query = searchText ?? .constant("")
     }
 
     private struct Period: Identifiable {
@@ -92,9 +90,6 @@ struct ProcessView: View {
             .navigationTitle(isSearch ? "Search" : (album?.localizedTitle ?? "Library"))
             .modifier(LibraryNavigationChrome(isSearch: isSearch, selecting: selecting))
             .toolbar {
-                if isSearch {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                }
                 if !isSearch && selecting, let photos = visiblePhotos, photos.count > 0 {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Select All") { selectAll(photos) }
@@ -120,7 +115,7 @@ struct ProcessView: View {
             .onChange(of: mode) { _, _ in updatePeriods() }
             .onChange(of: processing.resetCount) { _, _ in clearSelection(); files = [] }
             .sheet(isPresented: $showsResults) { ProcessingResultsView() }
-            .fullScreenCover(item: $detail) { PhotoDetailView(selection: $0) }
+            .fullScreenCover(item: $detail, content: photoDetail)
             .fileImporter(isPresented: $isImportingFiles, allowedContentTypes: [.image, .rawImage, .quickTimeMovie], allowsMultipleSelection: true) { result in
                 switch result {
                 case .success(let urls): files = urls
@@ -136,10 +131,8 @@ struct ProcessView: View {
         if isSearch {
             let request = searchRequest
             libraryContent
-                .searchable(text: $query, isPresented: $searchActive, placement: .navigationBarDrawer(displayMode: .always), prompt: "Photos, dates, and albums")
-                .task { searchActive = true }
                 .task(id: request) { await search(request) }
-                .onChange(of: query) { _, _ in selection = [] }
+                .onChange(of: query) { _, _ in clearSelection() }
         } else {
             libraryContent
         }
@@ -207,40 +200,61 @@ struct ProcessView: View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView {
-                    if #unavailable(iOS 18.0) {
-                        GeometryReader { geometry in
-                            Color.clear.preference(key: LibraryScrollOffset.self, value: -geometry.frame(in: .named("libraryScroll")).minY)
-                        }
-                        .frame(height: 0)
-                    }
                     if mode == .all {
                         let spacing: CGFloat = 2
                         let columns = max(3, Int(geometry.size.width / 120))
                         let side = max(1, (geometry.size.width - CGFloat(columns - 1) * spacing) / CGFloat(columns))
                         LazyVGrid(columns: Array(repeating: GridItem(.fixed(side), spacing: spacing), count: columns), spacing: spacing) {
                             ForEach(0..<photos.count, id: \.self) { index in
-                                let asset = photos[index]
-                                PhotoTile(asset: asset, size: CGSize(width: side, height: side), isSelected: selection.contains(asset.localIdentifier)) {
-                                    if selecting { toggle(asset) }
-                                    else { detail = PhotoDetailSelection(photos: photos, index: index) }
-                                }
-                                .id(ScrollTarget.photo(asset.localIdentifier))
+                                photoTile(photos, index: index, side: side)
                             }
                         }
                     } else {
                         periodGrid(photos, width: geometry.size.width)
                     }
                 }
-                .coordinateSpace(name: "libraryScroll")
-                .modifier(LibraryScrollBehavior(active: album == nil && !isSearch && mode == .all, compact: $compactDock))
                 .task(id: scrollTarget) {
                     guard let scrollTarget else { return }
                     await Task.yield()
                     guard !Task.isCancelled else { return }
-                    proxy.scrollTo(scrollTarget, anchor: .top)
+                    proxy.scrollTo(scrollTarget, anchor: detail == nil ? .top : nil)
                     self.scrollTarget = nil
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func photoTile(_ photos: PhotoAssets, index: Int, side: CGFloat) -> some View {
+        let asset = photos[index]
+        Group {
+            let tile = PhotoTile(asset: asset, size: CGSize(width: side, height: side), isSelected: selection.contains(asset.localIdentifier)) {
+                if selecting {
+                    toggle(asset)
+                } else {
+                    detailZoomID = asset.localIdentifier
+                    detail = PhotoDetailSelection(photos: photos, index: index)
+                }
+            }
+            if #available(iOS 18.0, *) {
+                tile.matchedTransitionSource(id: asset.localIdentifier, in: photoTransition)
+            } else {
+                tile
+            }
+        }
+        .id(ScrollTarget.photo(asset.localIdentifier))
+    }
+
+    @ViewBuilder
+    private func photoDetail(_ selection: PhotoDetailSelection) -> some View {
+        let viewer = PhotoDetailView(selection: selection) { id in
+            detailZoomID = id
+            scrollTarget = .photo(id)
+        }
+        if #available(iOS 18.0, *) {
+            viewer.navigationTransition(.zoom(sourceID: detailZoomID ?? selection.id, in: photoTransition))
+        } else {
+            viewer
         }
     }
 
@@ -323,7 +337,6 @@ struct ProcessView: View {
             assets = nil
             clearSelection()
             updatePeriods()
-            if !isSearch && album == nil { compactDock = false }
             return
         }
         let options = PhotoLibrary.photoOptions(sort: sort, ascending: ascending)
@@ -426,44 +439,6 @@ private struct LibraryNavigationChrome: ViewModifier {
     }
 }
 
-private struct LibraryScrollBehavior: ViewModifier {
-    let active: Bool
-    @Binding var compact: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var previous = 0
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: Int.self) { geometry in
-                bucket(geometry.contentOffset.y + geometry.contentInsets.top)
-            } action: { old, new in
-                update(from: old, to: new)
-            }
-        } else {
-            content.onPreferenceChange(LibraryScrollOffset.self) { offset in
-                let next = bucket(offset)
-                update(from: previous, to: next)
-                previous = next
-            }
-        }
-    }
-
-    private func bucket(_ offset: CGFloat) -> Int { max(0, Int(offset / 44)) }
-
-    private func update(from old: Int, to new: Int) {
-        guard active, new != old else { return }
-        let collapsed = new > old && new >= 2
-        if collapsed != compact {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { compact = collapsed }
-        }
-    }
-}
-
-private struct LibraryScrollOffset: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 private struct PhotoTile: View {
     let asset: PHAsset
     let size: CGSize
@@ -529,7 +504,10 @@ struct PhotoThumbnail: View {
         .accessibilityHidden(true)
         .onAppear { load() }
         .onChange(of: pixelSize) { _, _ in if token != nil { load() } }
-        .onChange(of: asset.localIdentifier) { _, _ in if token != nil { load() } }
+        .onChange(of: asset.localIdentifier) { _, _ in
+            image = nil
+            if token != nil { load() }
+        }
         .onChange(of: asset.modificationDate) { _, _ in if token != nil { load() } }
         .onDisappear { cancel(); image = nil }
     }
@@ -537,7 +515,6 @@ struct PhotoThumbnail: View {
     private func load() {
         cancel()
         guard pixelSize.width > 0, pixelSize.height > 0 else { return }
-        image = nil
         let id = UUID()
         token = id
         let options = PHImageRequestOptions()

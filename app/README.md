@@ -12,9 +12,10 @@ The app targets iPhone and iPad on iOS 17 or later. Build with Xcode 26 or
 newer to get the system Liquid Glass appearance on compatible devices.
 
 Open a photo and tap **Add Styles**, or use **Select** and **Process** for a batch.
-The search button finds photos by filename, date, album, and media type. Scroll
-the Library grid to reveal the **Year**, **Month**, and **All** views. Save the
-processing results as new assets in Photos.
+The Search tab finds photos by filename, date, album, and media type. On iOS 26
+and later, the Library timeline moves into the system tab bar as it minimizes.
+The Library sort menu also provides the **Year**, **Month**, and **All** views.
+Save the processing results as new assets in Photos.
 Stylio bundles the shared JavaScript pipeline from [`web/src/`](../web/src/) and
 runs it in WebKit on the device. The pipeline downloads supported AI models and
 codecs as needed. Settings → On this device manages these downloads and the
