@@ -1,0 +1,95 @@
+name: Stylio iOS build
+run-name: Stylio iOS - ${{ github.event.client_payload.request_id }}
+
+on:
+  repository_dispatch:
+    types: [stylio-ios-build]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Validate build request
+        env:
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'Expected a full source commit SHA from scripts/build-ios.sh.' >&2
+            exit 1
+          fi
+          printf 'Source commit: `%s`\n' "$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.client_payload.sha }}
+          persist-credentials: false
+
+      - name: Identify Xcode and the device SDK
+        id: toolchain
+        run: |
+          xcode_version=$(xcodebuild -version)
+          sdk_version=$(xcrun --sdk iphoneos --show-sdk-version)
+          printf '%s\niPhoneOS SDK %s\n' "$xcode_version" "$sdk_version"
+          toolchain_id=$(printf '%s\n%s\n' "$xcode_version" "$sdk_version" | shasum -a 256 | cut -d' ' -f1)
+          echo "id=$toolchain_id" >> "$GITHUB_OUTPUT"
+
+      # Only restore a packaged build for identical project files, sources and assets.
+      - name: Cache the unsigned IPA
+        id: ipa
+        if: github.event.client_payload.clean != true
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/stylio-artifacts/Stylio-unsigned.ipa
+          key: stylio-ipa-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('app/Stylio.xcodeproj/**', 'app/Stylio/**') }}
+
+      - name: Cache Xcode compilation and modules
+        if: github.event.client_payload.clean != true && steps.ipa.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/stylio-build/CompilationCache.noindex
+            ${{ runner.temp }}/stylio-build/ModuleCache.noindex
+          key: stylio-xcode-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('app/Stylio.xcodeproj/**') }}-${{ hashFiles('app/Stylio/**/*.swift') }}
+          restore-keys: |
+            stylio-xcode-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('app/Stylio.xcodeproj/**') }}-
+
+      - name: Build for iPhone and iPad
+        if: steps.ipa.outputs.cache-hit != 'true'
+        run: |
+          xcodebuild \
+            -project app/Stylio.xcodeproj \
+            -scheme Stylio \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/stylio-build" \
+            -showBuildTimingSummary \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=YES \
+            COMPILATION_CACHE_CAS_PATH="$RUNNER_TEMP/stylio-build/CompilationCache.noindex" \
+            MODULE_CACHE_DIR="$RUNNER_TEMP/stylio-build/ModuleCache.noindex" \
+            build
+
+      - name: Package unsigned IPA
+        if: steps.ipa.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/stylio-package/Payload" "$RUNNER_TEMP/stylio-artifacts"
+          ditto "$RUNNER_TEMP/stylio-build/Build/Products/Release-iphoneos/Stylio.app" \
+            "$RUNNER_TEMP/stylio-package/Payload/Stylio.app"
+          cd "$RUNNER_TEMP/stylio-package"
+          zip -qry "$RUNNER_TEMP/stylio-artifacts/Stylio-unsigned.ipa" Payload
+
+      - name: Verify IPA
+        run: unzip -tq "$RUNNER_TEMP/stylio-artifacts/Stylio-unsigned.ipa"
+
+      - name: Upload device build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stylio-iOS
+          path: ${{ runner.temp }}/stylio-artifacts/Stylio-unsigned.ipa
+          compression-level: 0
+          if-no-files-found: error
