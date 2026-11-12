@@ -10,7 +10,7 @@ import {refinePortraitSubject} from './subject-inference.js';
 import {inferForegroundMatte} from './foreground-matte-inference.js';
 import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte} from './foreground-matte.js';
 import {fusePortraitDepth} from './subject-depth-guidance.js';
-import {describePortraitScene} from './portrait-scene-response.js';
+import {centerPortraitFocus,describePortraitScene} from './portrait-scene-response.js';
 
 export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{signal,provider='webgpu',modelId='standard'}={}) {
   depthModel(modelId);
@@ -121,6 +121,13 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         generatedSelection:generatedSelection?.report??null,fused:null,reason:'no-foreground-guidance'};
     }
 
+    if(!suggestedFocus){
+      const focus=centerPortraitFocus(gray,width,height);
+      if(focus){
+        const display=storedPointToDisplay(focus.x,focus.y,orientation.angle,orientation.mirror);
+        suggestedFocus={...focus,displayX:display.x,displayY:display.y};
+      }
+    }
     const sceneProfile=describePortraitScene(gray,width,height,{focusX:suggestedFocus?.x??.5,focusY:suggestedFocus?.y??.5,matte});
     return {gray,subjectReport,foregroundReport,suggestedFocus,sceneProfile,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,
       sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,

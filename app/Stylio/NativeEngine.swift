@@ -10,12 +10,41 @@ struct ProcessingFiles: Sendable {
     let output: URL
 }
 
+private final class ModelRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard let url = request.url, var destination = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              destination.host != nil, destination.user == nil, destination.password == nil,
+              destination.port == nil || destination.port == 443,
+              destination.scheme == "http" || destination.scheme == "https" else {
+            completionHandler(nil)
+            return
+        }
+        destination.scheme = "https"
+        guard let secureURL = destination.url else { completionHandler(nil); return }
+        var secured = request
+        secured.url = secureURL
+        secured.httpMethod = "HEAD"
+        completionHandler(secured)
+    }
+}
+
 private actor EngineRoutes: HTTPHandler {
+    private struct DetailManifest: Decodable {
+        struct Model: Decodable {
+            let file: String
+            let sourceUrl: URL
+        }
+        let models: [String: Model]
+    }
+
     static let port: UInt16 = 49327
     static let host = "127.0.0.1:\(port)"
     static let origin = "http://\(host)"
+    private static let modelBase = URL(string: "https://wanthinnn.github.io/stylio/")!
 
     private let root: URL
+    private let modelSession = URLSession(configuration: .ephemeral)
     private var jobs: [UUID: ProcessingFiles] = [:]
     private var probes: [UUID: URL] = [:]
 
@@ -51,13 +80,47 @@ private actor EngineRoutes: HTTPHandler {
             return try serve(file)
         }
 
-        let isRemoteModel = path.hasPrefix("vendor/ai-portrait/") || path.hasPrefix("vendor/ai-style/")
-        if isRemoteModel, file.pathExtension == "wasm" || file.lastPathComponent.contains(".onnx") {
-            var headers = responseHeaders()
-            headers[.location] = "https://wanthinnn.github.io/stylio/\(path)"
-            return HTTPResponse(statusCode: .temporaryRedirect, headers: headers)
+        let isModelDirectory = components.count == 3 && first == "vendor"
+            && ["ai-portrait", "ai-style", "ai-detail"].contains(String(components[1]))
+        if isModelDirectory, file.pathExtension == "wasm" || path.hasSuffix(".onnx") || path.hasSuffix(".onnx_data") {
+            return try await redirectModel(path)
         }
         return HTTPResponse(statusCode: .notFound)
+    }
+
+    private func redirectModel(_ path: String) async throws -> HTTPResponse {
+        let destination: URL
+        if path.hasPrefix("vendor/ai-detail/") {
+            // These weights are distributed by their upstreams. The JS worker
+            // checks the downloaded bytes against the bundled manifest.
+            let file = root.appending(path: "vendor/ai-detail/assets.json")
+            let manifest = try JSONDecoder().decode(DetailManifest.self, from: Data(contentsOf: file))
+            let filename = (path as NSString).lastPathComponent
+            guard let source = manifest.models.values.first(where: { $0.file == filename })?.sourceUrl,
+                  source.scheme == "https" else {
+                return HTTPResponse(statusCode: .notFound)
+            }
+            destination = source
+        } else {
+            guard let source = try await resolvePagesModel(path) else { return HTTPResponse(statusCode: .notFound) }
+            destination = source
+        }
+        var headers = responseHeaders()
+        headers[.location] = destination.absoluteString
+        return HTTPResponse(statusCode: .temporaryRedirect, headers: headers)
+    }
+
+    private func resolvePagesModel(_ path: String) async throws -> URL? {
+        let source = Self.modelBase.appending(path: path)
+        var request = URLRequest(url: source, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.httpMethod = "HEAD"
+        // Resolve the Pages custom-domain redirect before handing the download to WebKit.
+        let (_, response) = try await modelSession.data(for: request, delegate: ModelRedirects())
+        guard let http = response as? HTTPURLResponse, let destination = http.url, destination.scheme == "https",
+              (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+        return destination
     }
 
     private func handleJob(_ request: HTTPRequest, components: [Substring]) async throws -> HTTPResponse {

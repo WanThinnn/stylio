@@ -21,6 +21,37 @@ export function portraitPreviewBlur(aperture){
   return 8*4.5/aperture;
 }
 
+// Without a semantic focus, the centre can land just outside a nearby subject
+// (for example in a gap in its silhouette). Look for a supported near surface
+// only when the centre neighbourhood contains two well-separated depth layers.
+export function centerPortraitFocus(gray,width,height){
+  const cx=Math.floor(width/2),cy=Math.floor(height/2);
+  const radius=Math.floor(Math.min(width,height)*.06);
+  if(radius<3)return null;
+  const histogram=new Uint32Array(256);
+  for(let y=cy-radius;y<=cy+radius;y++)for(let x=cx-radius;x<=cx+radius;x++)histogram[gray[y*width+x]]++;
+  const far=quantile(histogram,.25),near=quantile(histogram,.75);
+  if(near-far<48||gray[cy*width+cx]>far+12)return null;
+
+  const threshold=near-12,patch=Math.max(1,Math.floor(radius/4));
+  let nearAtCenter=0;
+  for(let y=cy-patch;y<=cy+patch;y++)for(let x=cx-patch;x<=cx+patch;x++){
+    if(gray[y*width+x]>=threshold)nearAtCenter++;
+  }
+  if(nearAtCenter*10<(2*patch+1)**2)return null;
+  let best=null,bestDistance=Infinity;
+  for(let y=cy-radius+patch;y<=cy+radius-patch;y++)for(let x=cx-radius+patch;x<=cx+radius-patch;x++){
+    const distance=(x-cx)**2+(y-cy)**2;
+    if(distance>=bestDistance||gray[y*width+x]<threshold)continue;
+    let supported=true;
+    for(let dy=-patch;dy<=patch&&supported;dy++)for(let dx=-patch;dx<=patch;dx++){
+      if(gray[(y+dy)*width+x+dx]<threshold){supported=false;break;}
+    }
+    if(supported){bestDistance=distance;best={x:(x+.5)/width,y:(y+.5)/height};}
+  }
+  return best;
+}
+
 export function describePortraitScene(gray,width,height,{focusX=.5,focusY=.5,matte=null}={}){
   if(!(gray instanceof Uint8Array)||!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||gray.length!==width*height
     ||![focusX,focusY].every(v=>Number.isFinite(v)&&v>=0&&v<=1))throw Error('Invalid Portrait scene geometry');

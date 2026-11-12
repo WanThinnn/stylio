@@ -7,7 +7,7 @@ import {depthModel} from '../../web/src/portrait/depth-models.js';
 import {shapeAiDisparity,AI_DISPARITY_MAX} from '../../web/src/portrait/ai-depth-refinement.js';
 import {fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte} from '../../web/src/portrait/foreground-matte.js';
 import {fusePortraitDepth} from '../../web/src/portrait/subject-depth-guidance.js';
-import {describePortraitScene} from '../../web/src/portrait/portrait-scene-response.js';
+import {centerPortraitFocus,describePortraitScene} from '../../web/src/portrait/portrait-scene-response.js';
 
 // Exercise the actual orchestration with model/decode boundaries substituted.
 // Timeout cases use the real worker watchdog, not a hand-created error name.
@@ -19,7 +19,7 @@ function harness({apple=true,foreground,subject}={}){
   for(let y=12;y<52;y++)for(let x=12;x<52;x++)confidence[y*width+x]=245;
   const matte={width,height,confidence,source:'apple-pem'},gray=new Uint8Array(width*height).fill(150);
   const context={Uint8Array,console:{warn(){}},navigator:{gpu:{}},crossOriginIsolated:true,
-    depthModel,shapeAiDisparity,AI_DISPARITY_MAX,fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte,fusePortraitDepth,describePortraitScene,
+    depthModel,shapeAiDisparity,AI_DISPARITY_MAX,fuseForegroundMattes,foregroundFocusPoint,portraitFocusAnchor,selectGeneratedPortraitMatte,fusePortraitDepth,centerPortraitFocus,describePortraitScene,
     discoverHeic:()=>({props:{},primary:1}),dimensionsForItem:()=>[width,height],
     inferenceGeometry:()=>({width,height}),itemOrientation:()=>({angle:0,mirror:null}),
     storedPointToDisplay:(x,y)=>({x,y}),depthInputBudgets:()=>[64],

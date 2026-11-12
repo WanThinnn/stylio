@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {describePortraitScene,portraitPreviewBlur} from '../../web/src/portrait/portrait-scene-response.js';
+import {centerPortraitFocus,describePortraitScene,portraitPreviewBlur} from '../../web/src/portrait/portrait-scene-response.js';
 import {relativePortraitResponse} from '../../web/src/portrait/portrait-blur-response.js';
 import {portraitProjection} from '../../web/src/portrait/portrait-geometry.js';
 const profile=JSON.parse(fs.readFileSync(new URL('../../web/src/portrait/portrait-template.json',import.meta.url)));
@@ -57,6 +57,23 @@ test('flat depth and isolated outliers cannot be promoted into strong blur',()=>
  assert.equal(response(s).sceneResponseApplied,false);
  gray[Math.floor(h/2)*w+Math.floor(w/2)]=255;
  assert.equal(describePortraitScene(gray,w,h).reason,'unstable-focus');
+});
+test('a centre point in a narrow depth gap moves onto the adjacent supported subject',()=>{
+ const width=240,height=180,cx=width/2,cy=height/2;
+ const depth=gap=>{
+  const gray=new Uint8Array(width*height).fill(80);
+  for(let y=cy-30;y<cy+30;y++)for(let x=cx-30;x<cx+30;x++){
+   if(x<cx-gap)gray[y*width+x]=208;
+  }
+  return gray;
+ };
+ const gray=depth(1),original=gray.slice();
+ const focus=centerPortraitFocus(gray,width,height);
+ assert.ok(focus);
+ assert.equal(describePortraitScene(gray,width,height,{focusX:focus.x,focusY:focus.y}).focusCode,208);
+ assert.deepEqual(gray,original);
+ assert.equal(centerPortraitFocus(depth(3),width,height),null,'a stable distant centre keeps its focus');
+ assert.equal(centerPortraitFocus(depth(-1),width,height),null,'a stable near centre keeps its focus');
 });
 test('accepted semantic subject changes confidence continuously and does not change depth samples',()=>{
  const gray=scene(),copy=gray.slice(),confidence=new Uint8Array(w*h);
