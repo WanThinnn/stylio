@@ -4,8 +4,37 @@ import Foundation
 import Photos
 import UIKit
 
+enum PhotoAIModel: String, CaseIterable {
+    case lite, standard, pro
+}
+
+struct PhotoProcessingOptions {
+    var gpu = true
+    var portrait = false
+    var detail = false
+    var style = false
+    var model = PhotoAIModel.standard
+
+    static var current: Self {
+        let preferences = UserDefaults.standard
+        return Self(
+            gpu: preferences.object(forKey: "stylio.ai.gpu") as? Bool ?? true,
+            portrait: preferences.bool(forKey: "stylio.ai.portrait"),
+            detail: preferences.bool(forKey: "stylio.ai.detail"),
+            style: preferences.bool(forKey: "stylio.ai.style"),
+            model: PhotoAIModel(rawValue: preferences.string(forKey: "stylio.ai.model") ?? "") ?? .standard
+        )
+    }
+
+    var arguments: [String: Any] {
+        ["gpu": gpu, "portrait": portrait, "detail": detail, "style": style, "model": model.rawValue]
+    }
+}
+
 @MainActor
 final class PhotoProcessing: ObservableObject {
+    static let shared = PhotoProcessing()
+
     enum Input {
         case photo(PHAsset)
         case file(URL, movie: URL?)
@@ -36,6 +65,14 @@ final class PhotoProcessing: ObservableObject {
         let notes: [String]
         let date: Date?
         let location: CLLocation?
+        let lostMotion: Bool
+    }
+
+    struct ShortcutResult {
+        var files: [(name: String, data: Data)] = []
+        var liveCount = 0
+        var lostMotionCount = 0
+        var failures: [String] = []
     }
 
     private enum ProcessingError: LocalizedError {
@@ -62,9 +99,42 @@ final class PhotoProcessing: ObservableObject {
     private let engine = NativeEngine()
     private let workDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("StylioProcessing", isDirectory: true)
 
-    init() { try? FileManager.default.removeItem(at: workDirectory) }
+    private init() { try? FileManager.default.removeItem(at: workDirectory) }
 
     func start(assets: [PHAsset], files: [URL]) throws {
+        let inputs = try beginBatch(assets: assets, files: files)
+        let options = PhotoProcessingOptions.current
+        Task {
+            defer { isProcessing = false }
+            await run(inputs, options: options, recoverLivePhotos: false)
+        }
+    }
+
+    func runShortcut(files: [URL], options: PhotoProcessingOptions) async throws -> ShortcutResult {
+        let inputs = try beginBatch(assets: [], files: files)
+        defer { isProcessing = false }
+        await run(inputs, options: options, recoverLivePhotos: true)
+        try Task.checkCancellation()
+
+        var result = ShortcutResult()
+        for job in jobs.prefix(inputs.count) {
+            guard let output = job.result, job.saveError == nil, !job.failed else {
+                result.failures.append("\(job.name): \(job.saveError ?? job.message)")
+                continue
+            }
+            do {
+                let data = try Data(contentsOf: output.photo, options: .mappedIfSafe)
+                result.files.append((output.photo.lastPathComponent, data))
+                if output.movie != nil { result.liveCount += 1 }
+                if output.lostMotion { result.lostMotionCount += 1 }
+            } catch {
+                result.failures.append("\(job.name) was saved to Photos but couldn’t be returned to Shortcuts.")
+            }
+        }
+        return result
+    }
+
+    private func beginBatch(assets: [PHAsset], files: [URL]) throws -> [Input] {
         guard !isBusy else { throw ProcessingError.busy }
         let (movies, photos) = files.reduce(into: ([URL](), [URL]())) { groups, file in
             if file.pathExtension.lowercased() == "mov" { groups.0.append(file) }
@@ -87,24 +157,15 @@ final class PhotoProcessing: ObservableObject {
         }
         jobs = inputs.map { Job(name: $0.name) } + jobs.filter { $0.saveError != nil }
         isProcessing = true
-        let preferences = UserDefaults.standard
-        let options: [String: Any] = [
-            "portrait": preferences.bool(forKey: "stylio.ai.portrait"),
-            "detail": preferences.bool(forKey: "stylio.ai.detail"),
-            "style": preferences.bool(forKey: "stylio.ai.style"),
-            "gpu": preferences.object(forKey: "stylio.ai.gpu") as? Bool ?? true,
-            "model": preferences.string(forKey: "stylio.ai.model") ?? "standard",
-        ]
-        Task {
-            let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
-            if preferences.bool(forKey: "stylio.keepScreenAwake") { UIApplication.shared.isIdleTimerDisabled = true }
-            defer {
-                UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
-                isProcessing = false
-            }
-            for (index, input) in inputs.enumerated() {
-                await process(input, at: index, options: options)
-            }
+        return inputs
+    }
+
+    private func run(_ inputs: [Input], options: PhotoProcessingOptions, recoverLivePhotos: Bool) async {
+        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+        if UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake") { UIApplication.shared.isIdleTimerDisabled = true }
+        defer { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled }
+        for (index, input) in inputs.enumerated() {
+            await process(input, at: index, options: options.arguments, recoverLivePhoto: recoverLivePhotos)
         }
     }
 
@@ -155,12 +216,29 @@ final class PhotoProcessing: ObservableObject {
         }
     }
 
-    private func process(_ input: Input, at index: Int, options: [String: Any]) async {
+    private func process(_ input: Input, at index: Int, options: [String: Any], recoverLivePhoto: Bool) async {
         let folder = workFolder(for: jobs[index].id)
         do {
+            try Task.checkCancellation()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             jobs[index].message = "Reading the original photo…"
-            let files = try await stage(input, in: folder)
+            var files = try await stage(input, in: folder)
+            var asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
+            var wasLivePhoto = files.movie != nil || asset?.mediaSubtypes.contains(.photoLive) == true
+            var captureDate: Date?
+            if recoverLivePhoto, files.movie == nil,
+               ["heic", "heif"].contains(files.input.pathExtension.lowercased()),
+               let info = try await engine.inspectLivePhoto(files.input) {
+                wasLivePhoto = true
+                captureDate = info.captureDate
+                jobs[index].message = "Finding the original Live Photo motion…"
+                let motion = folder.appendingPathComponent("original.mov")
+                if let match = try await ShortcutLivePhotoLookup.copyMotion(for: info, filename: input.name, to: motion) {
+                    asset = match
+                    files = ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output)
+                }
+            }
+            try Task.checkCancellation()
             let result = try await engine.process(files, name: input.name, options: options) { [weak self] message, progress in
                 if let message { self?.jobs[index].message = message }
                 if let progress { self?.jobs[index].progress = min(max(progress, 0), 100) }
@@ -169,7 +247,7 @@ final class PhotoProcessing: ObservableObject {
             var movie: URL?
             switch result.movie {
             case .none:
-                if case .photo(let asset) = input, asset.mediaSubtypes.contains(.photoLive) {
+                if wasLivePhoto {
                     notes.append("The paired video could not be found. This result is a still photo.")
                 }
             case .compatible: movie = files.movie
@@ -181,8 +259,9 @@ final class PhotoProcessing: ObservableObject {
             try? FileManager.default.removeItem(at: files.input)
             let photo = folder.appendingPathComponent(URL(fileURLWithPath: result.name).lastPathComponent)
             if photo != files.output { try FileManager.default.moveItem(at: files.output, to: photo) }
-            let asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
-            jobs[index].result = Output(photo: photo, movie: movie, notes: notes, date: asset?.creationDate, location: asset?.location)
+            try Task.checkCancellation()
+            jobs[index].result = Output(photo: photo, movie: movie, notes: notes, date: asset?.creationDate ?? captureDate,
+                                        location: asset?.location, lostMotion: wasLivePhoto && movie == nil)
             jobs[index].progress = nil
             await saveResult(at: index)
         } catch {
@@ -206,9 +285,9 @@ final class PhotoProcessing: ObservableObject {
             let resources = PHAssetResource.assetResources(for: asset)
             guard let photo = PhotoLibrary.originalPhoto(in: resources) else { throw ProcessingError.photoUnavailable }
             let still = folder.appendingPathComponent("input").appendingPathExtension(URL(fileURLWithPath: photo.originalFilename).pathExtension)
-            try await write(photo, to: still)
+            try await Self.write(photo, to: still)
             let movie = asset.mediaSubtypes.contains(.photoLive) ? resources.first { $0.type == .pairedVideo } : nil
-            if let movie { try await write(movie, to: movieDestination) }
+            if let movie { try await Self.write(movie, to: movieDestination) }
             return ProcessingFiles(input: still, movie: movie == nil ? nil : movieDestination, movieOutput: movieOutput, output: output)
         case .file(let file, let movie):
             let still = folder.appendingPathComponent("input").appendingPathExtension(file.pathExtension)
@@ -220,13 +299,13 @@ final class PhotoProcessing: ObservableObject {
         }
     }
 
-    private func write(_ resource: PHAssetResource, to destination: URL) async throws {
+    static func write(_ resource: PHAssetResource, to destination: URL) async throws {
         let options = PHAssetResourceRequestOptions()
         options.isNetworkAccessAllowed = true
         try await PHAssetResourceManager.default().writeData(for: resource, toFile: destination, options: options)
     }
 
-    private nonisolated static func copyImported(_ source: URL, to destination: URL) throws {
+    nonisolated static func copyImported(_ source: URL, to destination: URL) throws {
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
         try FileManager.default.copyItem(at: source, to: destination)

@@ -28,6 +28,24 @@ If the MOV already has native Styles tracks, Stylio can add the required Texture
 metadata while preserving the existing video and audio samples. The results
 screen explains when a Live Photo can only be saved as a still.
 
+## Run from the Photos share sheet
+
+Set up a shortcut once on the iPhone or iPad:
+
+1. Open Shortcuts, create a shortcut, and enable **Show in Share Sheet** in its details.
+2. Let it receive **Images**. Include **Media** or **Files** if you also share
+   explicit HEIC/MOV pairs from Files.
+3. Add **Process Photos with Stylio** and set **Photos** to **Shortcut Input**.
+   Its options default to GPU on, Standard, and the three optional AI effects off.
+
+Then open Photos, select a photo, and choose the shortcut from **Share**. Stylio
+opens to run WebKit, processes the input, and saves a new asset automatically.
+The action returns the processed HEIC for use in later shortcut steps. For a Live
+Photo, use **Current** in the Photos share options so the HEIC can retain its
+pairing identifier. Stylio can use an included MOV or recover matching motion
+from Photos when read access permits. The shortcut reports when a detected Live
+Photo was saved as a still.
+
 ## Build from Windows and test on an iPhone
 
 1. Install [GitHub CLI](https://cli.github.com/) and sign in with `gh auth login`.

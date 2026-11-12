@@ -195,24 +195,22 @@ private struct AboutView: View {
     }
 }
 
-private struct AISettingsView: View {
-    private enum Model: String, CaseIterable {
-        case lite, standard, pro
-
-        var title: LocalizedStringKey {
-            switch self {
-            case .lite: "Lite"
-            case .standard: "Standard"
-            case .pro: "Pro"
-            }
+private extension PhotoAIModel {
+    var title: LocalizedStringKey {
+        switch self {
+        case .lite: "Lite"
+        case .standard: "Standard"
+        case .pro: "Pro"
         }
     }
+}
 
+private struct AISettingsView: View {
     @AppStorage("stylio.ai.portrait") private var portrait = false
     @AppStorage("stylio.ai.detail") private var detail = false
     @AppStorage("stylio.ai.style") private var adaptiveStyles = false
     @AppStorage("stylio.ai.gpu") private var gpu = true
-    @AppStorage("stylio.ai.model") private var model: Model = .standard
+    @AppStorage("stylio.ai.model") private var model: PhotoAIModel = .standard
 
     var body: some View {
         Form {
@@ -260,7 +258,7 @@ private struct AISettingsView: View {
 
     private var modelRow: some View {
         Picker(selection: $model) {
-            ForEach(Model.allCases, id: \.self) { option in
+            ForEach(PhotoAIModel.allCases, id: \.self) { option in
                 Text(option.title).tag(option)
             }
         } label: {

@@ -9,6 +9,7 @@ import {movieStyleTracks,photoContentIdentifier,validateLivePair} from '../media
 import {addMovieTexture} from '../media/native-movie-texture.js';
 import {hasTexture} from '../styles/texture.js';
 import {discoverHeic} from '../core/heif.js';
+import {photoCaptureDate} from '../media/photo-date.js';
 
 async function readFile(route, name) {
   const response = await fetch(route, {cache: 'no-store'});
@@ -111,7 +112,16 @@ export function createNativeEngine(notify) {
     }
   }
 
-  return {process};
+  return {process, inspectLivePhoto};
+}
+
+export async function inspectLivePhoto(route) {
+  const file = await readFile(route, 'shared photo');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const identifier = photoContentIdentifier(bytes);
+  if (!identifier) return null;
+  const capture = photoCaptureDate(bytes);
+  return {identifier, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
 }
 
 export function livePhotoDisposition(source, output, movie) {

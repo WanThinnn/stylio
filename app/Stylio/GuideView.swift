@@ -7,6 +7,7 @@ struct GuideView: View {
                 GuideCard("How to use", summary: "Process a photo, then fine-tune it in Photos.", icon: "photo", tint: .blue) {
                     Text("Open a photo in Library or Albums and tap Add Styles. To process several photos together, tap Select, choose photos, and tap Process.")
                     Text("Stylio saves the result to Photos automatically. Open it in Photos → Edit to adjust Styles. Texture and Grain require iOS 27.")
+                    Text("In Shortcuts, add Process Photos with Stylio to a shortcut that receives Images from the Share Sheet. Set its Photos input to Shortcut Input. Then run it directly from Photos → Share.")
                 }
                 GuideCard("Formats and processing", summary: "Supported formats, HDR, Live Photo and originals.", icon: "square.3.layers.3d", tint: .purple) {
                     Text("Stylio supports HEIC, JPG, PNG, DNG, WebP, GIF, BMP and AVIF. It develops DNG to sRGB HEIC and uses one frame from animated images.")

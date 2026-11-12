@@ -3,6 +3,8 @@ import UIKit
 
 @main
 struct StylioApp: App {
+    init() { StylioShortcuts.updateAppShortcutParameters() }
+
     var body: some Scene {
         WindowGroup { StylioTabs() }
     }
@@ -15,7 +17,7 @@ private struct StylioTabs: View {
 
     @AppStorage("stylio.appearance") private var appearance: AppAppearance = .system
     @StateObject private var library = PhotoLibrary()
-    @StateObject private var processing = PhotoProcessing()
+    @StateObject private var processing = PhotoProcessing.shared
     @State private var destination: Destination = .library
     @State private var timeline = LibraryTimeline.all
     @State private var showsLibraryTimeline = false

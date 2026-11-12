@@ -87,6 +87,14 @@ test('native export can add the donor Texture track while keeping the paired vid
   assert.throws(()=>addMovieTexture(concat([original,box('free',new Uint8Array(0))]),donor),/layout/);
 });
 
+test('native engine inspects a shared still for its Live Photo identifier',async t=>{
+  const source=pairedPhoto('shortcut-live-identifier');
+  t.mock.method(globalThis,'fetch',async route=>new Response(route==='/probes/paired'?source:new Uint8Array(8)));
+  const engine=createNativeEngine(()=>{});
+  assert.equal((await engine.inspectLivePhoto('/probes/paired')).identifier,'shortcut-live-identifier');
+  assert.equal(await engine.inspectLivePhoto('/probes/unpaired'),null);
+});
+
 test('native engine publishes the shared HEIC result through the file bridge',async t=>{
   const source=pairedPhoto('native-engine-identifier'),updates=[];
   let output;

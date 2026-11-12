@@ -40,16 +40,25 @@ final class PhotoLibrary: NSObject, ObservableObject, PHPhotoLibraryChangeObserv
     @Published private(set) var myAlbums: [Album] = []
     @Published private(set) var smartAlbums: [Album] = []
     private var isObserving = false
+    private static var readAccessRequest: Task<PHAuthorizationStatus, Never>?
 
     deinit {
         if isObserving { PHPhotoLibrary.shared().unregisterChangeObserver(self) }
     }
 
     func requestAccessIfNeeded() async {
-        if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .notDetermined {
-            _ = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        }
+        _ = await Self.authorizeReading()
         refresh()
+    }
+
+    static func authorizeReading() async -> PHAuthorizationStatus {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .notDetermined else { return status }
+        if let readAccessRequest { return await readAccessRequest.value }
+        let task = Task { await PHPhotoLibrary.requestAuthorization(for: .readWrite) }
+        readAccessRequest = task
+        defer { readAccessRequest = nil }
+        return await task.value
     }
 
     func refresh() {

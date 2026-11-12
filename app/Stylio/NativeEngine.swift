@@ -17,17 +17,24 @@ private actor EngineRoutes: HTTPHandler {
 
     private let root: URL
     private var jobs: [UUID: ProcessingFiles] = [:]
+    private var probes: [UUID: URL] = [:]
 
     init(root: URL) { self.root = root }
 
     func register(_ files: ProcessingFiles, for id: UUID) { jobs[id] = files }
     func unregister(_ id: UUID) { jobs[id] = nil }
+    func registerProbe(_ input: URL, for id: UUID) { probes[id] = input }
+    func unregisterProbe(_ id: UUID) { probes[id] = nil }
 
     func handleRequest(_ request: HTTPRequest) async throws -> HTTPResponse {
         guard request.headers[.host] == Self.host else { return HTTPResponse(statusCode: .forbidden) }
         let components = request.path.split(separator: "/")
         if components.first == "jobs" {
             return try await handleJob(request, components: components)
+        }
+        if components.first == "probes", request.method == .GET, components.count == 2,
+           let id = UUID(uuidString: String(components[1])), let input = probes[id] {
+            return try serve(input)
         }
 
         guard request.method == .GET,
@@ -47,7 +54,7 @@ private actor EngineRoutes: HTTPHandler {
         let isRemoteModel = path.hasPrefix("vendor/ai-portrait/") || path.hasPrefix("vendor/ai-style/")
         if isRemoteModel, file.pathExtension == "wasm" || file.lastPathComponent.contains(".onnx") {
             var headers = responseHeaders()
-            headers[.location] = "https://stylio.smartxdr.app/\(path)"
+            headers[.location] = "https://wanthinnn.github.io/stylio/\(path)"
             return HTTPResponse(statusCode: .temporaryRedirect, headers: headers)
         }
         return HTTPResponse(statusCode: .notFound)
@@ -119,6 +126,11 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let name: String
         let movie: Movie
         let notes: [String]
+    }
+
+    struct LivePhotoInfo {
+        let identifier: String
+        let captureDate: Date?
     }
 
     enum CacheAction: Equatable { case update, clear, reset }
@@ -197,6 +209,35 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         }
         await dataStore.removeData(ofTypes: types, modifiedSince: .distantPast)
         if action == .update { _ = try await readyView() }
+    }
+
+    func inspectLivePhoto(_ input: URL) async throws -> LivePhotoInfo? {
+        let view = try await readyView()
+        guard let routes else { throw EngineError.unavailable }
+        let id = UUID()
+        await routes.registerProbe(input, for: id)
+        let value: Any?
+        do {
+            value = try await view.callAsyncJavaScript(
+                "return await globalThis.stylioNative.inspectLivePhoto(route);",
+                arguments: ["route": "/probes/\(id.uuidString)"], in: nil, contentWorld: .page
+            )
+        } catch {
+            await routes.unregisterProbe(id)
+            throw error
+        }
+        await routes.unregisterProbe(id)
+        guard let result = value as? [String: Any], let identifier = result["identifier"] as? String else { return nil }
+        var date: Date?
+        if let timestamp = result["timestamp"] as? Double {
+            date = Date(timeIntervalSince1970: timestamp / 1000)
+        } else if let localDate = result["date"] as? String {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+            date = formatter.date(from: localDate)
+        }
+        return LivePhotoInfo(identifier: identifier, captureDate: date)
     }
 
     private func readyView() async throws -> WKWebView {
