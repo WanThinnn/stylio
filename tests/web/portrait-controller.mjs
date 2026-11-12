@@ -48,6 +48,16 @@ test('an unknown native Styles schema keeps its separate compatibility notice',a
  assert.equal(ui.published,original);assert.deepEqual(notes,[[AI_STRINGS.en.compatibility,'compatibility']]);
 });
 
+test('existing Portrait depth reports a preserved result to the native engine',async()=>{
+ const {ui,original,runner,notes}=controller({eligibility:'existing-depth',failure:Error('AI must not run')});
+ const reasons=[];
+ ui.portraitSkipped=reason=>reasons.push(reason);
+ await runner.tryAiPortrait(Uint8Array.of(1),original,ui,'portrait.HEIC');
+ assert.deepEqual(reasons,['existing-depth']);
+ assert.deepEqual(notes,[[AI_STRINGS.en.skip,'ai']]);
+ assert.equal(ui.published,original);
+});
+
 test('missing-source skip still blocks inference when a queued candidate is retried',async()=>{
  const {ui,original,candidate,runner,notes,busy,progress}=controller({failure:Error('AI must not run')});
  ui.output(original);candidate.skip='missing-native-styles';

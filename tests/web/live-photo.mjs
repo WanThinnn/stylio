@@ -96,11 +96,11 @@ test('native engine inspects a shared still for its Live Photo identifier',async
   t.mock.method(globalThis,'fetch',async route=>new Response(photos.get(route)??Uint8Array.of(255,216,255,217)));
   const engine=createNativeEngine(()=>{});
   for(const [route,format] of [['/probes/paired','heic'],['/probes/converted','jpeg']]){
-    const info=await engine.inspectLivePhoto(route);
+    const info=await engine.inspectSharedPhoto(route);
     assert.equal(info.identifier,'shortcut-live-identifier');
     assert.equal(info.format,format);
   }
-  assert.equal(await engine.inspectLivePhoto('/probes/unpaired'),null);
+  assert.equal(await engine.inspectSharedPhoto('/probes/unpaired'),null);
 });
 
 test('native engine publishes the shared HEIC result through the file bridge',async t=>{

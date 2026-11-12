@@ -1,6 +1,8 @@
 import AppIntents
 import AVFoundation
+import CoreGraphics
 import Foundation
+import ImageIO
 import Photos
 import UniformTypeIdentifiers
 
@@ -51,7 +53,7 @@ struct ProcessPhotosIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ReturnsValue<[IntentFile]> & ProvidesDialog {
+    func perform() async throws -> some IntentResult & ReturnsValue<[IntentFile]> {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temporary) }
 
@@ -79,19 +81,8 @@ struct ProcessPhotosIntent: AppIntent {
         guard !result.files.isEmpty else { throw ShortcutFailure(message: result.failures.first ?? "No photo was saved.") }
 
         let files = result.files.map { IntentFile(data: $0.data, filename: $0.name, type: .heic) }
-        let dialog: IntentDialog
-        if !result.failures.isEmpty {
-            dialog = "Saved \(files.count) to Photos. \(result.failures.count) didn’t complete. Open the results tray in Stylio for details."
-        } else if let reason = result.depthWarnings.first {
-            dialog = "Saved \(files.count) to Photos. Lighting Depth wasn’t added to \(result.depthWarnings.count): \(reason)"
-        } else if result.lostMotionCount > 0 {
-            dialog = "Saved \(files.count) to Photos. \(result.lostMotionCount) Live Photos were saved as stills."
-        } else if result.liveCount == files.count {
-            dialog = files.count == 1 ? "Live Photo saved to Photos." : "Saved \(files.count) Live Photos to Photos."
-        } else {
-            dialog = files.count == 1 ? "Photo saved to Photos." : "Saved \(files.count) photos to Photos."
-        }
-        return .result(value: files, dialog: dialog)
+        await ProcessingNotifications.post(result)
+        return .result(value: files)
     }
 
     private static func filename(for file: IntentFile) -> String {
@@ -132,8 +123,9 @@ struct StylioShortcuts: AppShortcutsProvider {
 }
 
 @MainActor
-enum ShortcutLivePhotoLookup {
-    static func copyMotion(for info: NativeEngine.LivePhotoInfo, filename: String, to destination: URL) async throws -> PHAsset? {
+enum ShortcutPhotoLookup {
+    static func copyMotion(for info: NativeEngine.SharedPhotoInfo, filename: String, to destination: URL) async throws -> PHAsset? {
+        guard let identifier = info.identifier else { return nil }
         let status = await PhotoLibrary.authorizeReading()
         guard status == .authorized || status == .limited else { return nil }
 
@@ -149,7 +141,7 @@ enum ShortcutLivePhotoLookup {
             for index in 0..<candidates.count {
                 let asset = candidates.object(at: index)
                 checked.insert(asset.localIdentifier)
-                if try await copyIfMatching(asset, identifier: info.identifier, to: destination) { return asset }
+                if try await copyIfMatching(asset, identifier: identifier, to: destination) { return asset }
             }
         }
 
@@ -159,9 +151,65 @@ enum ShortcutLivePhotoLookup {
         guard !stem.isEmpty, stem != "Photo" else { return nil }
         let matches = try await namedCandidates(stem: stem, excluding: checked)
         for asset in matches {
-            if try await copyIfMatching(asset, identifier: info.identifier, to: destination) { return asset }
+            if try await copyIfMatching(asset, identifier: identifier, to: destination) { return asset }
         }
         return nil
+    }
+
+    static func originalAsset(filename: String, captureDate: Date) -> PHAsset? {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard status == .authorized || status == .limited else { return nil }
+        let stem = (filename as NSString).deletingPathExtension
+        guard !stem.isEmpty, stem.caseInsensitiveCompare("Photo") != .orderedSame else { return nil }
+        let options = PhotoLibrary.photoOptions(sorted: false)
+        options.predicate = NSPredicate(format: "creationDate >= %@ AND creationDate <= %@",
+                                        captureDate.addingTimeInterval(-2) as NSDate, captureDate.addingTimeInterval(2) as NSDate)
+        let candidates = PHAsset.fetchAssets(with: .image, options: options)
+        var match: PHAsset?
+        for index in 0..<candidates.count {
+            let asset = candidates.object(at: index)
+            guard let original = PhotoLibrary.originalPhoto(in: PHAssetResource.assetResources(for: asset)),
+                  (original.originalFilename as NSString).deletingPathExtension.caseInsensitiveCompare(stem) == .orderedSame else { continue }
+            if match != nil { return nil }
+            match = asset
+        }
+        return match
+    }
+
+    static func matchesJPEG(_ jpeg: URL, original: URL) async -> Bool {
+        await Task.detached(priority: .utility) {
+            guard let shared = Self.thumbnailPixels(jpeg), let reference = Self.thumbnailPixels(original),
+                  shared.width == reference.width, shared.height == reference.height else { return false }
+            var total = 0
+            var outliers = 0
+            for offset in stride(from: 0, to: shared.bytes.count, by: 4) {
+                let red = abs(Int(shared.bytes[offset]) - Int(reference.bytes[offset]))
+                let green = abs(Int(shared.bytes[offset + 1]) - Int(reference.bytes[offset + 1]))
+                let blue = abs(Int(shared.bytes[offset + 2]) - Int(reference.bytes[offset + 2]))
+                total += red + green + blue
+                if max(red, green, blue) > 20 { outliers += 1 }
+            }
+            let count = shared.width * shared.height
+            return total <= count * 3 * 6 && outliers * 20 <= count
+        }.value
+    }
+
+    private nonisolated static func thumbnailPixels(_ url: URL) -> (width: Int, height: Int, bytes: [UInt8])? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, CGImageSourceGetPrimaryImageIndex(source), [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 64,
+              ] as CFDictionary), let color = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
+                                          bitsPerComponent: 8, bytesPerRow: image.width * 4, space: color,
+                                          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        return drawn ? (image.width, image.height, pixels) : nil
     }
 
     private nonisolated static func livePhotoOptions() -> PHFetchOptions {
@@ -187,7 +235,7 @@ enum ShortcutLivePhotoLookup {
         return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
     }
 
-    private static func copyIfMatching(_ asset: PHAsset, identifier: String, to destination: URL) async throws -> Bool {
+    static func copyIfMatching(_ asset: PHAsset, identifier: String, to destination: URL) async throws -> Bool {
         try Task.checkCancellation()
         guard let movie = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .pairedVideo }) else { return false }
         do {

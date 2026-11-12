@@ -42,11 +42,14 @@ Set up a shortcut once on the iPhone or iPad:
 Then open Photos, select a photo, and choose the shortcut from **Share**. The
 action requests background execution, saves a new asset automatically, and
 returns the processed HEIC for use in later shortcut steps. If Photos shares a
-JPEG, Stylio can recover the original HEIC and MOV when the JPEG retains its
-Live Photo identifier and Stylio can read the matching library asset. Use
-**Current** for a Live Photo if **Automatic** removes the pairing identifier.
-The shortcut reports when a detected Live Photo was saved as a still or when
-the requested Lighting Depth effect could not be added.
+JPEG, Stylio can recover a matching original from the accessible Photos library.
+It uses the Live Photo identifier when available, or verifies a unique unedited
+HEIC candidate using its filename, capture time, and image content. When the
+original is a Live Photo, Stylio verifies its MOV before pairing. Use **Current**
+if **Automatic** shares too little information to recover the original.
+Enable **Completion Notifications** in **Stylio → Settings → Processing** to
+receive a system banner when a shortcut or background batch finishes. The banner
+also reports saves with missing Live Photo motion or Lighting Depth.
 
 ## Build from Windows and test on an iPhone
 

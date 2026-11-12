@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 enum AppAppearance: String, CaseIterable {
     case light, system, dark
@@ -23,6 +24,7 @@ enum AppAppearance: String, CaseIterable {
 }
 
 struct SettingsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var processing: PhotoProcessing
     @AppStorage("stylio.appearance") private var appearance: AppAppearance = .system
     @AppStorage("stylio.keepScreenAwake") private var keepScreenAwake = false
@@ -31,6 +33,7 @@ struct SettingsView: View {
     @State private var feedback: String?
     @State private var buildLink: URL?
     @State private var showsFeedback = false
+    @State private var notificationStatus: UNAuthorizationStatus?
 
     var body: some View {
         Form {
@@ -51,6 +54,16 @@ struct SettingsView: View {
                 }
                 Toggle("Keep Screen Awake", systemImage: "iphone", isOn: $keepScreenAwake)
                 Toggle("Result Preview", systemImage: "photo", isOn: $resultPreview)
+                Button { Task { await configureNotifications() } } label: {
+                    LabeledContent {
+                        if let notificationStatus {
+                            Text(notificationStatus == .notDetermined ? "Set Up" : notificationStatus == .denied ? "Off" : "On")
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        Label("Completion Notifications", systemImage: "bell")
+                    }
+                }
             } header: {
                 Text("Processing")
             } footer: {
@@ -80,6 +93,11 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .task(id: scenePhase) {
+            if scenePhase == .active {
+                notificationStatus = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            }
+        }
         .confirmationDialog("Reset Stylio?", isPresented: $confirmReset, titleVisibility: .visible) {
             Button("Reset Stylio", role: .destructive) { Task { await maintain(.reset) } }
         } message: {
@@ -90,6 +108,23 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(feedback ?? "")
+        }
+    }
+
+    private func configureNotifications() async {
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        if status == .notDetermined {
+            do {
+                _ = try await center.requestAuthorization(options: [.alert])
+                notificationStatus = await center.notificationSettings().authorizationStatus
+            } catch {
+                buildLink = nil
+                feedback = error.localizedDescription
+                showsFeedback = true
+            }
+        } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
+            UIApplication.shared.open(url)
         }
     }
 

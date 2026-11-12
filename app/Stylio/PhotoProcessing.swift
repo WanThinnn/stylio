@@ -69,11 +69,12 @@ final class PhotoProcessing: ObservableObject {
         let depthWarning: String?
     }
 
-    struct ShortcutResult {
+    struct BatchResult {
         var files: [(name: String, data: Data)] = []
+        var savedCount = 0
         var liveCount = 0
         var lostMotionCount = 0
-        var depthWarnings: [String] = []
+        var depthWarningCount = 0
         var failures: [String] = []
     }
 
@@ -108,11 +109,14 @@ final class PhotoProcessing: ObservableObject {
         let options = PhotoProcessingOptions.current
         Task {
             defer { isProcessing = false }
-            _ = await run(inputs, options: options, fromShortcut: false)
+            let result = await run(inputs, options: options, fromShortcut: false)
+            if UIApplication.shared.applicationState == .background {
+                await ProcessingNotifications.post(result)
+            }
         }
     }
 
-    func runShortcut(files: [URL], options: PhotoProcessingOptions) async throws -> ShortcutResult {
+    func runShortcut(files: [URL], options: PhotoProcessingOptions) async throws -> BatchResult {
         let inputs = try beginBatch(assets: [], files: files)
         defer { isProcessing = false }
         let result = await run(inputs, options: options, fromShortcut: true)
@@ -146,32 +150,33 @@ final class PhotoProcessing: ObservableObject {
         return inputs
     }
 
-    private func run(_ inputs: [Input], options: PhotoProcessingOptions, fromShortcut: Bool) async -> ShortcutResult {
+    private func run(_ inputs: [Input], options: PhotoProcessingOptions, fromShortcut: Bool) async -> BatchResult {
         let keepAwake = !fromShortcut && UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake")
         let idleTimerWasDisabled = keepAwake && UIApplication.shared.isIdleTimerDisabled
         if keepAwake { UIApplication.shared.isIdleTimerDisabled = true }
         defer { if keepAwake { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled } }
 
-        var result = ShortcutResult()
+        var result = BatchResult()
         let ids = jobs.prefix(inputs.count).map(\.id)
         for (id, input) in zip(ids, inputs) {
             guard let index = jobs.firstIndex(where: { $0.id == id }) else { continue }
             await process(input, at: index, options: options.arguments, recoverLivePhoto: fromShortcut)
             let name = jobs[index].name
             let saved = await saveResult(at: index, returnPhoto: fromShortcut)
-            guard fromShortcut else { continue }
             guard let (output, data) = saved else {
                 result.failures.append("\(name): \(jobs[index].saveError ?? jobs[index].message)")
                 continue
             }
+            result.savedCount += 1
+            if output.movie != nil { result.liveCount += 1 }
+            if output.lostMotion { result.lostMotionCount += 1 }
+            if output.depthWarning != nil { result.depthWarningCount += 1 }
+            guard fromShortcut else { continue }
             guard let data else {
                 result.failures.append("\(name) was saved to Photos but couldn’t be returned to Shortcuts.")
                 continue
             }
             result.files.append((output.photo.lastPathComponent, data))
-            if output.movie != nil { result.liveCount += 1 }
-            if output.lostMotion { result.lostMotionCount += 1 }
-            if let warning = output.depthWarning { result.depthWarnings.append(warning) }
         }
         return result
     }
@@ -247,24 +252,15 @@ final class PhotoProcessing: ObservableObject {
             var wasLivePhoto = files.movie != nil || asset?.mediaSubtypes.contains(.photoLive) == true
             var captureDate: Date?
             var sourceName = input.name
-            if recoverLivePhoto, let info = try await engine.inspectLivePhoto(files.input), files.movie == nil || info.isJPEG {
-                wasLivePhoto = true
+            if recoverLivePhoto, let info = try await engine.inspectSharedPhoto(files.input), files.movie == nil || info.isJPEG {
+                wasLivePhoto = wasLivePhoto || info.identifier != nil
                 captureDate = info.captureDate
-                jobs[index].message = "Finding the original Live Photo motion…"
-                let motion = folder.appendingPathComponent("recovered.mov")
-                if let match = try await ShortcutLivePhotoLookup.copyMotion(for: info, filename: input.name, to: motion) {
-                    if !info.isJPEG {
-                        asset = match
-                        files = ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output)
-                    } else if let original = try await recoverOriginalStill(match, identifier: info.identifier, in: folder) {
-                        asset = match
-                        sourceName = original.name
-                        try? FileManager.default.removeItem(at: files.input)
-                        if let movie = files.movie { try? FileManager.default.removeItem(at: movie) }
-                        files = ProcessingFiles(input: original.url, movie: motion, movieOutput: files.movieOutput, output: files.output)
-                    } else {
-                        try? FileManager.default.removeItem(at: motion)
-                    }
+                jobs[index].message = info.isJPEG ? "Finding the original photo…" : "Finding the original Live Photo motion…"
+                if let recovered = try await recoverSharedPhoto(files, info: info, name: sourceName, in: folder) {
+                    files = recovered.files
+                    asset = recovered.asset
+                    sourceName = recovered.name
+                    wasLivePhoto = wasLivePhoto || recovered.asset.mediaSubtypes.contains(.photoLive)
                 }
             }
             try Task.checkCancellation()
@@ -302,13 +298,49 @@ final class PhotoProcessing: ObservableObject {
         }
     }
 
-    private func recoverOriginalStill(_ asset: PHAsset, identifier: String, in folder: URL) async throws -> (url: URL, name: String)? {
-        guard let photo = PhotoLibrary.originalPhoto(in: PHAssetResource.assetResources(for: asset)) else { return nil }
+    private func recoverSharedPhoto(_ files: ProcessingFiles, info: NativeEngine.SharedPhotoInfo, name: String, in folder: URL) async throws
+        -> (files: ProcessingFiles, asset: PHAsset, name: String)? {
+        let motion = folder.appendingPathComponent("recovered.mov")
+        let asset: PHAsset?
+        if info.identifier != nil {
+            asset = try await ShortcutPhotoLookup.copyMotion(for: info, filename: name, to: motion)
+        } else if info.isJPEG, let date = info.captureDate {
+            asset = ShortcutPhotoLookup.originalAsset(filename: name, captureDate: date)
+        } else {
+            return nil
+        }
+        guard let asset else { return nil }
+        if !info.isJPEG {
+            return (ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output), asset, name)
+        }
+
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard info.identifier != nil || !resources.contains(where: { $0.type == .adjustmentData }),
+              let photo = PhotoLibrary.originalPhoto(in: resources),
+              ["heic", "heif"].contains((photo.originalFilename as NSString).pathExtension.lowercased()),
+              let original = try await recoverOriginalStill(photo, matching: files.input, identifier: info.identifier, in: folder) else {
+            try? FileManager.default.removeItem(at: motion)
+            return nil
+        }
+        var pairedMovie: URL? = info.identifier == nil ? nil : motion
+        if pairedMovie == nil, asset.mediaSubtypes.contains(.photoLive),
+           let identifier = try await engine.inspectSharedPhoto(original)?.identifier,
+           try await ShortcutPhotoLookup.copyIfMatching(asset, identifier: identifier, to: motion) {
+            pairedMovie = motion
+        }
+        try? FileManager.default.removeItem(at: files.input)
+        if let movie = files.movie { try? FileManager.default.removeItem(at: movie) }
+        return (ProcessingFiles(input: original, movie: pairedMovie, movieOutput: files.movieOutput, output: files.output), asset, photo.originalFilename)
+    }
+
+    private func recoverOriginalStill(_ photo: PHAssetResource, matching jpeg: URL, identifier: String?, in folder: URL) async throws -> URL? {
         let still = folder.appendingPathComponent("recovered.heic")
         do {
             try await Self.write(photo, to: still)
-            if let info = try await engine.inspectLivePhoto(still), !info.isJPEG, info.identifier == identifier {
-                return (still, photo.originalFilename)
+            if let identifier {
+                if let info = try await engine.inspectSharedPhoto(still), !info.isJPEG, info.identifier == identifier { return still }
+            } else if await ShortcutPhotoLookup.matchesJPEG(jpeg, original: still) {
+                return still
             }
         } catch {
             // Process the shared JPEG if its original resource is unavailable.

@@ -192,8 +192,8 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let depthWarning: String?
     }
 
-    struct LivePhotoInfo {
-        let identifier: String
+    struct SharedPhotoInfo {
+        let identifier: String?
         let captureDate: Date?
         let isJPEG: Bool
     }
@@ -277,7 +277,7 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         if action == .update { _ = try await readyView() }
     }
 
-    func inspectLivePhoto(_ input: URL) async throws -> LivePhotoInfo? {
+    func inspectSharedPhoto(_ input: URL) async throws -> SharedPhotoInfo? {
         let view = try await readyView()
         guard let routes else { throw EngineError.unavailable }
         let id = UUID()
@@ -285,7 +285,7 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let value: Any?
         do {
             value = try await view.callAsyncJavaScript(
-                "return await globalThis.stylioNative.inspectLivePhoto(route);",
+                "return await globalThis.stylioNative.inspectSharedPhoto(route);",
                 arguments: ["route": "/probes/\(id.uuidString)"], in: nil, contentWorld: .page
             )
         } catch {
@@ -293,7 +293,7 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             throw error
         }
         await routes.unregisterProbe(id)
-        guard let result = value as? [String: Any], let identifier = result["identifier"] as? String else { return nil }
+        guard let result = value as? [String: Any] else { return nil }
         var date: Date?
         if let timestamp = result["timestamp"] as? Double {
             date = Date(timeIntervalSince1970: timestamp / 1000)
@@ -303,7 +303,7 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
             date = formatter.date(from: localDate)
         }
-        return LivePhotoInfo(identifier: identifier, captureDate: date, isJPEG: result["format"] as? String == "jpeg")
+        return SharedPhotoInfo(identifier: result["identifier"] as? String, captureDate: date, isJPEG: result["format"] as? String == "jpeg")
     }
 
     private func readyView() async throws -> WKWebView {

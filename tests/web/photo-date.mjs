@@ -6,6 +6,7 @@ import {buildRasterExif} from '../../web/src/raster/raster-import.js';
 import {concat,be} from '../../web/src/core/box.js';
 import {buildAppleStyleExif,preserveRasterExif} from '../../web/src/raster/exif.js';
 import {discoverHeic,extractItem} from '../../web/src/core/heif.js';
+import {inspectSharedPhoto} from '../../web/src/app/native-engine.js';
 
 function datedExif() {
   const le = (n,size) => be(n,size).reverse(), text = s => new TextEncoder().encode(s+'\0');
@@ -35,6 +36,15 @@ test('raster EXIF keeps capture date, timezone and fractional seconds independen
   assert.equal(exifDateFields(output).original,'2018:04:05 06:07:08');
   assert.equal(exifDateFields(output).offsetOriginal,'+07:00');
   assert.equal(exifDateFields(output).subsecOriginal,'456');
+});
+
+test('a shared JPEG without an Apple pairing identifier still exposes its original capture time',async t=>{
+  const exif=datedExif().subarray(4);
+  const jpeg=concat([Uint8Array.of(255,216,255,225),be(exif.length+2,2),exif,Uint8Array.of(255,217)]);
+  t.mock.method(globalThis,'fetch',async()=>new Response(jpeg));
+  assert.deepEqual(await inspectSharedPhoto('/probes/converted'),{
+    identifier:null,format:'jpeg',date:'2018:04:05 06:07:08',timestamp:Date.parse('2018-04-05T06:07:08.456+07:00'),
+  });
 });
 
 for(const [original,processed] of [

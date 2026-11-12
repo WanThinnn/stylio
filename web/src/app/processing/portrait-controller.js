@@ -8,6 +8,7 @@ import {createPortraitProgress} from './portrait-progress.js';
 export function createPortraitController({aiFeatures,aiCandidates,aiText,gpuAcceleration,selectedAiLevel,lane=0,acquireProcessingSlot}){
   function skippedNotice(ui,reason){
     ui.aiState('');
+    ui.portraitSkipped?.(reason);
     if(reason==='missing-native-styles')ui.note(aiText().missingNativeStyles,'compatibility');
     else if(reason==='unverified-styles')ui.note(aiText().compatibility,'compatibility');
     else ui.note(aiText().skip,'ai');

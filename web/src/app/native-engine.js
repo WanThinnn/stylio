@@ -53,6 +53,7 @@ export function createNativeEngine(notify) {
     let output;
     let failure;
     let portraitApplied = false;
+    let portraitPreserved = false;
     const ui = {
       set(message, kind) {
         if (kind === 'err') failure = message;
@@ -69,6 +70,7 @@ export function createNativeEngine(notify) {
       cancelAi: () => () => {},
       aiBusy() {},
       aiView(applied) { portraitApplied = applied; },
+      portraitSkipped(reason) { portraitPreserved = reason === 'existing-depth'; },
       portraitPreview() {},
       metadata() {},
       portraitAdvice(message) { ui.note(message, 'portrait'); },
@@ -109,7 +111,7 @@ export function createNativeEngine(notify) {
       }
 
       await writeFile(`${route}/output`, output);
-      const depthWarning = options.portrait === true && !portraitApplied
+      const depthWarning = options.portrait === true && !portraitApplied && !portraitPreserved
         ? notes.get('ai-error') || notes.get('ai') || notes.get('compatibility') || 'The photo has no compatible Lighting Depth result.'
         : null;
       return {name: output.name, movie, notes: [...notes.values()], depthWarning};
@@ -118,10 +120,10 @@ export function createNativeEngine(notify) {
     }
   }
 
-  return {process, inspectLivePhoto};
+  return {process, inspectSharedPhoto};
 }
 
-export async function inspectLivePhoto(route) {
+export async function inspectSharedPhoto(route) {
   const file = await readFile(route, 'shared photo');
   const bytes = new Uint8Array(await file.arrayBuffer());
   const format = imageFormat(bytes);
@@ -129,8 +131,8 @@ export async function inspectLivePhoto(route) {
   try {
     const exif = format === 'jpeg' ? extractRasterExif(bytes) : null;
     const identifier = format === 'jpeg' ? livePhotoIdentifierFromExif(exif) : photoContentIdentifier(bytes);
-    if (!identifier) return null;
     const capture = format === 'jpeg' ? captureDateFromExif(exif) : photoCaptureDate(bytes);
+    if (!identifier && (format !== 'jpeg' || !capture)) return null;
     return {identifier, format, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
   } catch { return null; }
 }
