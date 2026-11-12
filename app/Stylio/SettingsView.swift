@@ -124,7 +124,7 @@ struct SettingsView: View {
                 showsFeedback = true
             }
         } else if let url = URL(string: UIApplication.openNotificationSettingsURLString) {
-            UIApplication.shared.open(url)
+            await UIApplication.shared.open(url)
         }
     }
 

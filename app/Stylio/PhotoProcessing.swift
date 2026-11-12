@@ -4,7 +4,7 @@ import Foundation
 import Photos
 import UIKit
 
-enum PhotoAIModel: String, CaseIterable {
+enum PhotoAIModel: String, CaseIterable, Sendable {
     case lite, standard, pro
 }
 
