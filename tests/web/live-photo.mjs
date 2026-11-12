@@ -100,7 +100,9 @@ test('native engine inspects a shared still for its Live Photo identifier',async
     assert.equal(info.identifier,'shortcut-live-identifier');
     assert.equal(info.format,format);
   }
-  assert.equal(await engine.inspectSharedPhoto('/probes/unpaired'),null);
+  assert.deepEqual(await engine.inspectSharedPhoto('/probes/unpaired'),{
+    identifier:null,format:'jpeg',date:null,timestamp:null,
+  });
 });
 
 test('native engine publishes the shared HEIC result through the file bridge',async t=>{

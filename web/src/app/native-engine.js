@@ -127,14 +127,17 @@ export async function inspectSharedPhoto(route) {
   const file = await readFile(route, 'shared photo');
   const bytes = new Uint8Array(await file.arrayBuffer());
   const format = imageFormat(bytes);
-  if (format !== 'heic' && format !== 'jpeg') return null;
+  const rasterExif = ['jpeg','png','webp'].includes(format);
+  if (format !== 'heic' && !rasterExif) return null;
+  let identifier = null;
+  let capture = null;
   try {
-    const exif = format === 'jpeg' ? extractRasterExif(bytes) : null;
-    const identifier = format === 'jpeg' ? livePhotoIdentifierFromExif(exif) : photoContentIdentifier(bytes);
-    const capture = format === 'jpeg' ? captureDateFromExif(exif) : photoCaptureDate(bytes);
-    if (!identifier && (format !== 'jpeg' || !capture)) return null;
-    return {identifier, format, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
-  } catch { return null; }
+    const exif = rasterExif ? extractRasterExif(bytes) : null;
+    if (format === 'jpeg') identifier = livePhotoIdentifierFromExif(exif);
+    if (format === 'heic') identifier = photoContentIdentifier(bytes);
+    capture = rasterExif ? captureDateFromExif(exif) : photoCaptureDate(bytes);
+  } catch { /* A JPEG with no readable EXIF can still match a local photo. */ }
+  return {identifier, format, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
 }
 
 export function livePhotoDisposition(source, output, movie) {

@@ -1,6 +1,7 @@
 import Combine
 import CoreLocation
 import Foundation
+import ImageIO
 import Photos
 import UIKit
 
@@ -67,6 +68,7 @@ final class PhotoProcessing: ObservableObject {
         let location: CLLocation?
         let lostMotion: Bool
         let depthWarning: String?
+        let usedSharedJPEG: Bool
     }
 
     struct BatchResult {
@@ -75,6 +77,7 @@ final class PhotoProcessing: ObservableObject {
         var liveCount = 0
         var lostMotionCount = 0
         var depthWarningCount = 0
+        var sharedJPEGCount = 0
         var failures: [String] = []
     }
 
@@ -171,6 +174,7 @@ final class PhotoProcessing: ObservableObject {
             if output.movie != nil { result.liveCount += 1 }
             if output.lostMotion { result.lostMotionCount += 1 }
             if output.depthWarning != nil { result.depthWarningCount += 1 }
+            if output.usedSharedJPEG { result.sharedJPEGCount += 1 }
             guard fromShortcut else { continue }
             guard let data else {
                 result.failures.append("\(name) was saved to Photos but couldn’t be returned to Shortcuts.")
@@ -197,8 +201,8 @@ final class PhotoProcessing: ObservableObject {
             guard authorization == .authorized || authorization == .limited else { throw ProcessingError.photosAccess }
             try await PHPhotoLibrary.shared().performChanges {
                 let creation = PHAssetCreationRequest.forAsset()
-                creation.creationDate = output.date
-                creation.location = output.location
+                if let date = output.date { creation.creationDate = date }
+                if let location = output.location { creation.location = location }
                 creation.addResource(with: .photo, fileURL: output.photo, options: nil)
                 if let movie = output.movie { creation.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
             }
@@ -251,16 +255,21 @@ final class PhotoProcessing: ObservableObject {
             var asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
             var wasLivePhoto = files.movie != nil || asset?.mediaSubtypes.contains(.photoLive) == true
             var captureDate: Date?
+            var receivedJPEG = false
+            let sharedLocation = recoverLivePhoto ? Self.captureLocation(in: files.input) : nil
             var sourceName = input.name
-            if recoverLivePhoto, let info = try await engine.inspectSharedPhoto(files.input), files.movie == nil || info.isJPEG {
+            if recoverLivePhoto, let info = try await engine.inspectSharedPhoto(files.input) {
+                receivedJPEG = info.isJPEG
                 wasLivePhoto = wasLivePhoto || info.identifier != nil
                 captureDate = info.captureDate
-                jobs[index].message = info.isJPEG ? "Finding the original photo…" : "Finding the original Live Photo motion…"
-                if let recovered = try await recoverSharedPhoto(files, info: info, name: sourceName, in: folder) {
-                    files = recovered.files
-                    asset = recovered.asset
-                    sourceName = recovered.name
-                    wasLivePhoto = wasLivePhoto || recovered.asset.mediaSubtypes.contains(.photoLive)
+                if info.isJPEG || (info.identifier != nil && files.movie == nil) {
+                    jobs[index].message = info.isJPEG ? "Finding the original photo…" : "Finding the original Live Photo motion…"
+                    if let recovered = try await recoverSharedPhoto(files, info: info, name: sourceName, in: folder) {
+                        files = recovered.files
+                        asset = recovered.asset
+                        sourceName = recovered.name
+                        wasLivePhoto = wasLivePhoto || recovered.asset.mediaSubtypes.contains(.photoLive)
+                    }
                 }
             }
             try Task.checkCancellation()
@@ -287,8 +296,8 @@ final class PhotoProcessing: ObservableObject {
             try Task.checkCancellation()
             jobs[index].notes = notes
             jobs[index].result = Output(photo: photo, movie: movie, date: asset?.creationDate ?? captureDate,
-                                        location: asset?.location, lostMotion: wasLivePhoto && movie == nil,
-                                        depthWarning: result.depthWarning)
+                                        location: asset?.location ?? sharedLocation, lostMotion: wasLivePhoto && movie == nil,
+                                        depthWarning: result.depthWarning, usedSharedJPEG: receivedJPEG && asset == nil)
             jobs[index].progress = nil
         } catch {
             try? FileManager.default.removeItem(at: folder)
@@ -302,13 +311,13 @@ final class PhotoProcessing: ObservableObject {
         -> (files: ProcessingFiles, asset: PHAsset, name: String)? {
         let motion = folder.appendingPathComponent("recovered.mov")
         let asset: PHAsset?
-        if info.identifier != nil {
-            asset = try await ShortcutPhotoLookup.copyMotion(for: info, filename: name, to: motion)
-        } else if info.isJPEG, let date = info.captureDate {
-            asset = ShortcutPhotoLookup.originalAsset(filename: name, captureDate: date)
-        } else {
-            return nil
-        }
+        let motionAsset: PHAsset? = if info.identifier != nil {
+            try await ShortcutPhotoLookup.copyMotion(for: info, filename: name, to: motion)
+        } else { nil }
+        if let motionAsset { asset = motionAsset }
+        else if info.isJPEG {
+            asset = try await ShortcutPhotoLookup.originalAsset(matching: files.input, filename: name, captureDate: info.captureDate)
+        } else { return nil }
         guard let asset else { return nil }
         if !info.isJPEG {
             return (ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output), asset, name)
@@ -322,7 +331,7 @@ final class PhotoProcessing: ObservableObject {
             try? FileManager.default.removeItem(at: motion)
             return nil
         }
-        var pairedMovie: URL? = info.identifier == nil ? nil : motion
+        var pairedMovie: URL? = motionAsset == nil ? nil : motion
         if pairedMovie == nil, asset.mediaSubtypes.contains(.photoLive),
            let identifier = try await engine.inspectSharedPhoto(original)?.identifier,
            try await ShortcutPhotoLookup.copyIfMatching(asset, identifier: identifier, to: motion) {
@@ -331,6 +340,20 @@ final class PhotoProcessing: ObservableObject {
         try? FileManager.default.removeItem(at: files.input)
         if let movie = files.movie { try? FileManager.default.removeItem(at: movie) }
         return (ProcessingFiles(input: original, movie: pairedMovie, movieOutput: files.movieOutput, output: files.output), asset, photo.originalFilename)
+    }
+
+    private static func captureLocation(in file: URL) -> CLLocation? {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, CGImageSourceGetPrimaryImageIndex(source), nil) as? [String: Any],
+              let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any],
+              let latitude = (gps[kCGImagePropertyGPSLatitude as String] as? NSNumber)?.doubleValue,
+              let longitude = (gps[kCGImagePropertyGPSLongitude as String] as? NSNumber)?.doubleValue else { return nil }
+        let south = (gps[kCGImagePropertyGPSLatitudeRef as String] as? String)?.uppercased() == "S"
+        let west = (gps[kCGImagePropertyGPSLongitudeRef as String] as? String)?.uppercased() == "W"
+        let coordinate = CLLocationCoordinate2D(latitude: south ? -abs(latitude) : latitude,
+                                                longitude: west ? -abs(longitude) : longitude)
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
+        return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
 
     private func recoverOriginalStill(_ photo: PHAssetResource, matching jpeg: URL, identifier: String?, in folder: URL) async throws -> URL? {

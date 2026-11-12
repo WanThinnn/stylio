@@ -38,6 +38,11 @@ enum ProcessingNotifications {
                 ? String(localized: "Lighting Depth could not be added to one photo.")
                 : String(localized: "Lighting Depth could not be added to \(result.depthWarningCount) photos."))
         }
+        if result.sharedJPEGCount > 0 {
+            details.append(result.sharedJPEGCount == 1
+                ? String(localized: "Used the shared JPEG. No matching HEIC was found.")
+                : String(localized: "Used \(result.sharedJPEGCount) shared JPEGs without matching originals."))
+        }
         content.body = details.joined(separator: " ")
         try? await center.add(UNNotificationRequest(identifier: "stylio.processing.finished", content: content, trigger: nil))
     }
