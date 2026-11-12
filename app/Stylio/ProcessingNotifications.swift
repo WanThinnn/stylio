@@ -9,19 +9,22 @@ enum ProcessingNotifications {
         guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
 
         let content = UNMutableNotificationContent()
+        var details: [String] = []
         if result.savedCount == 0 {
             content.title = String(localized: "Couldn’t Save Photos")
-        } else if result.liveCount == result.savedCount {
-            content.title = result.savedCount == 1
-                ? String(localized: "Live Photo Saved")
-                : String(localized: "\(result.savedCount) Live Photos Saved")
         } else {
-            content.title = result.savedCount == 1
-                ? String(localized: "Saved to Photos")
-                : String(localized: "Saved \(result.savedCount) Photos")
+            content.title = String(localized: "Processing Complete")
+            if result.liveCount == result.savedCount {
+                details.append(result.savedCount == 1
+                    ? String(localized: "1 Live Photo saved to Photos.")
+                    : String(localized: "\(result.savedCount) Live Photos saved to Photos."))
+            } else {
+                details.append(result.savedCount == 1
+                    ? String(localized: "1 processed photo saved to Photos.")
+                    : String(localized: "\(result.savedCount) processed photos saved to Photos."))
+            }
         }
 
-        var details: [String] = []
         if !result.failures.isEmpty {
             details.append(String(localized: "Open Stylio to check incomplete results."))
         }
