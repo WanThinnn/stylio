@@ -44,9 +44,11 @@ action requests background execution, saves a new asset automatically, and
 returns the processed HEIC for use in later shortcut steps. If Photos shares a
 JPEG, Stylio can recover a matching original from the accessible Photos library.
 It uses the Live Photo identifier when available. For a converted JPEG, it can
-compare accessible photos near the capture time, or recent local previews if
-the metadata is missing. It verifies the original image before using it and
-checks the MOV identifier for a Live Photo. It keeps capture time and GPS from
+compare accessible photos near the capture time or recent local previews, then
+check filenames across the accessible library. It verifies the HEIC before
+using it. If the photo was edited in Photos, recovery requires a matching
+current HEIC representation. Stylio checks the MOV identifier for a Live Photo.
+It keeps capture time and GPS from
 the matched library asset or the shared file. If the banner reports that Stylio
 used the shared JPEG, choose **Current** to share the original format.
 Enable **Completion Notifications** in **Stylio → Settings → Processing** to

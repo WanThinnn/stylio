@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
+import {createNativeEngine} from '../../web/src/app/native-engine.js';
+import {executeJob} from '../../web/src/media/heic-worker.js';
 
 test('HDR import retains the failing phase and original codec error',async()=>{
  const code=readFileSync(new URL('../../web/src/raster/raster-import.js',import.meta.url),'utf8');
@@ -36,4 +38,23 @@ test('file processing shows HDR diagnostics without publishing an incomplete out
  failure.message='FFmpeg exit 1: '+('encoder progress '.repeat(40))+'Cannot allocate memory';
  await processor.handleFile(new File([new Uint8Array([255,216,255])],'IDG_test.jpg',{type:'image/jpeg'}));
  assert.ok(events.some(e=>e[0]==='note'&&/Cannot allocate memory/.test(e[1])),'long codec logs must retain the final error, not just the banner');
+});
+
+test('the native bridge includes the HDR import failure reason in the Shortcut error',async t=>{
+ const signal=new TextEncoder().encode('urn:iso:std:iso:ts:21496:-1\0');
+ const input=Uint8Array.of(255,216,255,226,0,signal.length+2,...signal,255,217);
+ const {Worker,crossOriginIsolated,fetch}=globalThis;
+ t.after(()=>Object.assign(globalThis,{Worker,crossOriginIsolated,fetch}));
+ t.mock.method(console,'error',()=>{});
+ globalThis.crossOriginIsolated=true;
+ globalThis.fetch=async()=>new Response(input);
+ globalThis.Worker=class {
+  terminate() {}
+  async postMessage({id,...job}) {
+   try { this.onmessage({data:{id,result:await executeJob(job)}}); }
+   catch(error) { this.onmessage({data:{id,error:error.message}}); }
+  }
+ };
+ await assert.rejects(createNativeEngine(()=>{}).process({route:'/test',name:'IMG_test.jpg',paired:false}),
+  /Could not transfer this JPEG.s HDR.*No HEIC.*HDR JPEG \[metadata\]: HDR JPEG has no MPF image table/s);
 });

@@ -176,8 +176,7 @@ enum ShortcutPhotoLookup {
                     if !["", "photo", "image", "jpeg"].contains(stem.lowercased()) {
                         let named = (0..<candidates.count).compactMap { index -> PHAsset? in
                             let asset = candidates.object(at: index)
-                            guard let original = Self.uneditedHEIC(in: asset),
-                                  (original.originalFilename as NSString).deletingPathExtension.caseInsensitiveCompare(stem) == .orderedSame else { return nil }
+                            guard Self.matchesFilename(stem, for: asset) else { return nil }
                             return asset
                         }
                         if named.count == 1 { return named.first }
@@ -197,6 +196,33 @@ enum ShortcutPhotoLookup {
         return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
     }
 
+    static func assetNamed(_ filename: String, matching jpeg: URL, excluding checked: Set<String>) async throws -> PHAsset? {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let stem = (filename as NSString).deletingPathExtension
+        guard status == .authorized || status == .limited,
+              !["", "photo", "image", "jpeg"].contains(stem.lowercased()) else { return nil }
+        let lookup = Task.detached(priority: .utility) {
+            let options = PhotoLibrary.photoOptions(sorted: false)
+            options.includeAllBurstAssets = true
+            let assets = PHAsset.fetchAssets(with: .image, options: options)
+            let deadline = ContinuousClock.now + .seconds(4)
+            var candidates: [PHAsset] = []
+            for index in 0..<assets.count {
+                try Task.checkCancellation()
+                guard ContinuousClock.now < deadline else { return nil as PHAsset? }
+                let asset = assets.object(at: index)
+                if Self.matchesFilename(stem, for: asset) { candidates.append(asset) }
+            }
+            guard let first = candidates.first else { return nil }
+            if candidates.count == 1 { return checked.contains(first.localIdentifier) ? nil : first }
+            guard let shared = Self.thumbnailPixels(jpeg) else { return nil }
+            let match = try Self.uniqueVisualMatch(shared, in: candidates, strict: true, before: deadline)
+            guard let match, !checked.contains(match.localIdentifier) else { return nil }
+            return match
+        }
+        return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
+    }
+
     static func matchesJPEG(_ jpeg: URL, original: URL) async -> Bool {
         await Task.detached(priority: .utility) {
             guard let shared = Self.thumbnailPixels(jpeg), let reference = Self.thumbnailPixels(original) else { return false }
@@ -204,15 +230,32 @@ enum ShortcutPhotoLookup {
         }.value
     }
 
-    private nonisolated static func uneditedHEIC(in asset: PHAsset) -> PHAssetResource? {
+    nonisolated static func currentHEIC(in resources: [PHAssetResource]) -> PHAssetResource? {
+        let edited = resources.first { $0.type == .fullSizePhoto }
+        let resource = edited ?? (resources.contains { $0.type == .adjustmentData } ? nil : PhotoLibrary.originalPhoto(in: resources))
+        guard let resource else { return nil }
+        let type: UTType? = if #available(iOS 26.0, *) {
+            resource.contentType
+        } else {
+            UTType(resource.uniformTypeIdentifier)
+        }
+        return type?.conforms(to: .heic) == true || type?.conforms(to: .heif) == true ? resource : nil
+    }
+
+    private nonisolated static func matchesFilename(_ stem: String, for asset: PHAsset) -> Bool {
         let resources = PHAssetResource.assetResources(for: asset)
-        guard !resources.contains(where: { $0.type == .adjustmentData }),
-              let original = PhotoLibrary.originalPhoto(in: resources),
-              ["heic", "heif"].contains((original.originalFilename as NSString).pathExtension.lowercased()) else { return nil }
-        return original
+        guard let current = currentHEIC(in: resources) else { return false }
+        let names = [PhotoLibrary.originalPhoto(in: resources)?.originalFilename, current.originalFilename].compactMap { $0 }
+        return names.contains { ($0 as NSString).deletingPathExtension.caseInsensitiveCompare(stem) == .orderedSame }
     }
 
     private nonisolated static func uniqueVisualMatch(_ shared: ThumbnailPixels, in candidates: PHFetchResult<PHAsset>,
+                                                      strict: Bool, before deadline: ContinuousClock.Instant) throws -> PHAsset? {
+        let assets = (0..<candidates.count).map { candidates.object(at: $0) }
+        return try uniqueVisualMatch(shared, in: assets, strict: strict, before: deadline)
+    }
+
+    private nonisolated static func uniqueVisualMatch(_ shared: ThumbnailPixels, in candidates: [PHAsset],
                                                       strict: Bool, before deadline: ContinuousClock.Instant) throws -> PHAsset? {
         let options = PHImageRequestOptions()
         options.isSynchronous = true
@@ -220,11 +263,10 @@ enum ShortcutPhotoLookup {
         options.resizeMode = .exact
         let size = CGSize(width: 128, height: 128)
         var match: PHAsset?
-        for index in 0..<candidates.count {
+        for asset in candidates {
             try Task.checkCancellation()
             guard ContinuousClock.now < deadline else { return nil }
-            let asset = candidates.object(at: index)
-            guard Self.uneditedHEIC(in: asset) != nil else { continue }
+            guard Self.currentHEIC(in: PHAssetResource.assetResources(for: asset)) != nil else { continue }
             var sample: ThumbnailPixels?
             PHImageManager.default().requestImage(for: asset, targetSize: size, contentMode: .aspectFit, options: options) { image, _ in
                 if let image { sample = Self.thumbnailPixels(image) }
@@ -326,9 +368,11 @@ enum ShortcutPhotoLookup {
         return try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() }
     }
 
-    static func copyIfMatching(_ asset: PHAsset, identifier: String, to destination: URL) async throws -> Bool {
+    static func copyIfMatching(_ asset: PHAsset, identifier: String, to destination: URL, edited: Bool = false) async throws -> Bool {
         try Task.checkCancellation()
-        guard let movie = PHAssetResource.assetResources(for: asset).first(where: { $0.type == .pairedVideo }) else { return false }
+        let resources = PHAssetResource.assetResources(for: asset)
+        let editedMovie = edited ? resources.first { $0.type == .fullSizePairedVideo } : nil
+        guard let movie = editedMovie ?? resources.first(where: { $0.type == .pairedVideo }) else { return false }
         do {
             try await PhotoProcessing.write(movie, to: destination)
             let metadata = try await AVURLAsset(url: destination).loadMetadata(for: .quickTimeMetadata)

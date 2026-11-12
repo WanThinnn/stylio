@@ -85,7 +85,10 @@ export function createNativeEngine(notify) {
         packageLivePhotos: false,
       });
       await processor.handleFile(file, ui);
-      if (failure || !output) throw Error(failure || 'The processing engine did not produce a photo.');
+      if (failure || !output) {
+        const detail = notes.get('conversion');
+        throw Error([failure || 'The processing engine did not produce a photo.', detail].filter(Boolean).join('\n'));
+      }
 
       let movie = 'none';
       if (paired) {

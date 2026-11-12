@@ -247,6 +247,7 @@ final class PhotoProcessing: ObservableObject {
 
     private func process(_ input: Input, at index: Int, options: [String: Any], recoverLivePhoto: Bool) async {
         let folder = workFolder(for: jobs[index].id)
+        var usedSharedJPEG = false
         do {
             try Task.checkCancellation()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -255,11 +256,10 @@ final class PhotoProcessing: ObservableObject {
             var asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
             var wasLivePhoto = files.movie != nil || asset?.mediaSubtypes.contains(.photoLive) == true
             var captureDate: Date?
-            var receivedJPEG = false
             let sharedLocation = recoverLivePhoto ? Self.captureLocation(in: files.input) : nil
             var sourceName = input.name
             if recoverLivePhoto, let info = try await engine.inspectSharedPhoto(files.input) {
-                receivedJPEG = info.isJPEG
+                usedSharedJPEG = info.isJPEG
                 wasLivePhoto = wasLivePhoto || info.identifier != nil
                 captureDate = info.captureDate
                 if info.isJPEG || (info.identifier != nil && files.movie == nil) {
@@ -269,6 +269,7 @@ final class PhotoProcessing: ObservableObject {
                         asset = recovered.asset
                         sourceName = recovered.name
                         wasLivePhoto = wasLivePhoto || recovered.asset.mediaSubtypes.contains(.photoLive)
+                        usedSharedJPEG = false
                     }
                 }
             }
@@ -297,12 +298,22 @@ final class PhotoProcessing: ObservableObject {
             jobs[index].notes = notes
             jobs[index].result = Output(photo: photo, movie: movie, date: asset?.creationDate ?? captureDate,
                                         location: asset?.location ?? sharedLocation, lostMotion: wasLivePhoto && movie == nil,
-                                        depthWarning: result.depthWarning, usedSharedJPEG: receivedJPEG && asset == nil)
+                                        depthWarning: result.depthWarning, usedSharedJPEG: usedSharedJPEG)
             jobs[index].progress = nil
         } catch {
             try? FileManager.default.removeItem(at: folder)
             jobs[index].failed = true
-            jobs[index].message = error.localizedDescription
+            var message = error.localizedDescription
+            if usedSharedJPEG && !Task.isCancelled {
+                let access = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                let explanation: String = switch access {
+                case .authorized: String(localized: "Stylio could not verify a matching HEIC in Photos.")
+                case .limited: String(localized: "Stylio could not verify a matching HEIC in the photos it can access.")
+                default: String(localized: "Stylio needs access to Photos to look up the matching HEIC.")
+                }
+                message += "\n" + explanation
+            }
+            jobs[index].message = message
             jobs[index].progress = nil
         }
     }
@@ -310,36 +321,48 @@ final class PhotoProcessing: ObservableObject {
     private func recoverSharedPhoto(_ files: ProcessingFiles, info: NativeEngine.SharedPhotoInfo, name: String, in folder: URL) async throws
         -> (files: ProcessingFiles, asset: PHAsset, name: String)? {
         let motion = folder.appendingPathComponent("recovered.mov")
-        let asset: PHAsset?
         let motionAsset: PHAsset? = if info.identifier != nil {
             try await ShortcutPhotoLookup.copyMotion(for: info, filename: name, to: motion)
         } else { nil }
-        if let motionAsset { asset = motionAsset }
-        else if info.isJPEG {
-            asset = try await ShortcutPhotoLookup.originalAsset(matching: files.input, filename: name, captureDate: info.captureDate)
-        } else { return nil }
-        guard let asset else { return nil }
         if !info.isJPEG {
-            return (ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output), asset, name)
+            guard let motionAsset else { return nil }
+            return (ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output), motionAsset, name)
         }
 
-        let resources = PHAssetResource.assetResources(for: asset)
-        guard info.identifier != nil || !resources.contains(where: { $0.type == .adjustmentData }),
-              let photo = PhotoLibrary.originalPhoto(in: resources),
-              ["heic", "heif"].contains((photo.originalFilename as NSString).pathExtension.lowercased()),
-              let original = try await recoverOriginalStill(photo, matching: files.input, identifier: info.identifier, in: folder) else {
-            try? FileManager.default.removeItem(at: motion)
-            return nil
+        func verify(_ candidate: PHAsset) async throws -> (still: URL, asset: PHAsset, resource: PHAssetResource)? {
+            let resources = PHAssetResource.assetResources(for: candidate)
+            guard let photo = ShortcutPhotoLookup.currentHEIC(in: resources),
+                  let still = try await recoverOriginalStill(photo, matching: files.input, identifier: info.identifier, in: folder) else { return nil }
+            return (still, candidate, photo)
         }
-        var pairedMovie: URL? = motionAsset == nil ? nil : motion
-        if pairedMovie == nil, asset.mediaSubtypes.contains(.photoLive),
+
+        var checked = Set<String>()
+        var verified: (still: URL, asset: PHAsset, resource: PHAssetResource)?
+        if let motionAsset {
+            checked.insert(motionAsset.localIdentifier)
+            verified = try await verify(motionAsset)
+        }
+        if verified == nil,
+           let candidate = try await ShortcutPhotoLookup.originalAsset(matching: files.input, filename: name, captureDate: info.captureDate),
+           checked.insert(candidate.localIdentifier).inserted {
+            verified = try await verify(candidate)
+        }
+        if verified == nil,
+           let candidate = try await ShortcutPhotoLookup.assetNamed(name, matching: files.input, excluding: checked) {
+            verified = try await verify(candidate)
+        }
+        let verifiedMotion = verified?.resource.type == .photo && verified?.asset.localIdentifier == motionAsset?.localIdentifier
+        if !verifiedMotion { try? FileManager.default.removeItem(at: motion) }
+        guard let (original, asset, resource) = verified else { return nil }
+        var pairedMovie = verifiedMotion ? motion : files.movie
+        if !verifiedMotion, asset.mediaSubtypes.contains(.photoLive),
            let identifier = try await engine.inspectSharedPhoto(original)?.identifier,
-           try await ShortcutPhotoLookup.copyIfMatching(asset, identifier: identifier, to: motion) {
+           try await ShortcutPhotoLookup.copyIfMatching(asset, identifier: identifier, to: motion, edited: resource.type == .fullSizePhoto) {
             pairedMovie = motion
         }
         try? FileManager.default.removeItem(at: files.input)
-        if let movie = files.movie { try? FileManager.default.removeItem(at: movie) }
-        return (ProcessingFiles(input: original, movie: pairedMovie, movieOutput: files.movieOutput, output: files.output), asset, photo.originalFilename)
+        if let movie = files.movie, movie != pairedMovie { try? FileManager.default.removeItem(at: movie) }
+        return (ProcessingFiles(input: original, movie: pairedMovie, movieOutput: files.movieOutput, output: files.output), asset, resource.originalFilename)
     }
 
     private static func captureLocation(in file: URL) -> CLLocation? {
@@ -360,7 +383,7 @@ final class PhotoProcessing: ObservableObject {
         let still = folder.appendingPathComponent("recovered.heic")
         do {
             try await Self.write(photo, to: still)
-            if let identifier {
+            if let identifier, photo.type == .photo {
                 if let info = try await engine.inspectSharedPhoto(still), !info.isJPEG, info.identifier == identifier { return still }
             } else if await ShortcutPhotoLookup.matchesJPEG(jpeg, original: still) {
                 return still
