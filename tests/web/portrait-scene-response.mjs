@@ -67,13 +67,31 @@ test('a centre point in a narrow depth gap moves onto the adjacent supported sub
   }
   return gray;
  };
- const gray=depth(1),original=gray.slice();
+ const gray=depth(1);
+ gray[cy*width+cx]=98; // CPU depth can place the centre just above the far layer.
+ const original=gray.slice();
  const focus=centerPortraitFocus(gray,width,height);
  assert.ok(focus);
  assert.equal(describePortraitScene(gray,width,height,{focusX:focus.x,focusY:focus.y}).focusCode,208);
  assert.deepEqual(gray,original);
  assert.equal(centerPortraitFocus(depth(3),width,height),null,'a stable distant centre keeps its focus');
  assert.equal(centerPortraitFocus(depth(-1),width,height),null,'a stable near centre keeps its focus');
+});
+
+test('depth-only refocusing retains the previous background scale within the scene response limit',()=>{
+ const gray=new Uint8Array(w*h).fill(28);
+ for(let y=8;y<h-8;y++)for(let x=18;x<w-18;x++)gray[y*w+x]=81;
+ for(let y=18;y<h-18;y++)for(let x=19;x<38;x++)gray[y*w+x]=139;
+ const centerScene=describePortraitScene(gray,w,h);
+ const focus={focusX:.4,focusY:.5};
+ const previous=response(centerScene).disparityMax;
+ const uncorrected=describePortraitScene(gray,w,h,focus);
+ const corrected=describePortraitScene(gray,w,h,{...focus,centerScene});
+ assert.equal(centerScene.side,'background');
+ assert.ok(response(uncorrected).disparityMax<previous);
+ assert.ok(Math.abs(response(corrected).disparityMax-previous)<1e-9);
+ const capped=describePortraitScene(gray,w,h,{...focus,centerScene:{...centerScene,separation:.05}});
+ assert.equal(capped.targetResponse,1);
 });
 test('accepted semantic subject changes confidence continuously and does not change depth samples',()=>{
  const gray=scene(),copy=gray.slice(),confidence=new Uint8Array(w*h);

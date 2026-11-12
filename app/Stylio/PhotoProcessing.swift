@@ -54,6 +54,7 @@ final class PhotoProcessing: ObservableObject {
         var message = "Waiting"
         var progress: Double?
         var result: Output?
+        var notes: [String] = []
         var failed = false
         var saving = false
         var saveError: String?
@@ -62,7 +63,6 @@ final class PhotoProcessing: ObservableObject {
     struct Output {
         let photo: URL
         let movie: URL?
-        let notes: [String]
         let date: Date?
         let location: CLLocation?
         let lostMotion: Bool
@@ -96,7 +96,7 @@ final class PhotoProcessing: ObservableObject {
     @Published private(set) var isMaintaining = false
     @Published private(set) var resetCount = 0
     var isBusy: Bool { isProcessing || isMaintaining || jobs.contains(where: \.saving) }
-    var hasResultErrors: Bool { jobs.contains { $0.failed || $0.saveError != nil } }
+    var hasResultIssues: Bool { jobs.contains { $0.failed || $0.saveError != nil || ($0.result == nil && !$0.notes.isEmpty) } }
 
     private let engine = NativeEngine()
     private let workDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("StylioProcessing", isDirectory: true)
@@ -108,32 +108,15 @@ final class PhotoProcessing: ObservableObject {
         let options = PhotoProcessingOptions.current
         Task {
             defer { isProcessing = false }
-            await run(inputs, options: options, recoverLivePhotos: false)
+            _ = await run(inputs, options: options, fromShortcut: false)
         }
     }
 
     func runShortcut(files: [URL], options: PhotoProcessingOptions) async throws -> ShortcutResult {
         let inputs = try beginBatch(assets: [], files: files)
         defer { isProcessing = false }
-        await run(inputs, options: options, recoverLivePhotos: true)
+        let result = await run(inputs, options: options, fromShortcut: true)
         try Task.checkCancellation()
-
-        var result = ShortcutResult()
-        for job in jobs.prefix(inputs.count) {
-            guard let output = job.result, job.saveError == nil, !job.failed else {
-                result.failures.append("\(job.name): \(job.saveError ?? job.message)")
-                continue
-            }
-            do {
-                let data = try Data(contentsOf: output.photo, options: .mappedIfSafe)
-                result.files.append((output.photo.lastPathComponent, data))
-                if output.movie != nil { result.liveCount += 1 }
-                if output.lostMotion { result.lostMotionCount += 1 }
-                if let warning = output.depthWarning { result.depthWarnings.append(warning) }
-            } catch {
-                result.failures.append("\(job.name) was saved to Photos but couldn’t be returned to Shortcuts.")
-            }
-        }
         return result
     }
 
@@ -163,27 +146,46 @@ final class PhotoProcessing: ObservableObject {
         return inputs
     }
 
-    private func run(_ inputs: [Input], options: PhotoProcessingOptions, recoverLivePhotos: Bool) async {
-        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
-        let keepAwake = !recoverLivePhotos && UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake")
+    private func run(_ inputs: [Input], options: PhotoProcessingOptions, fromShortcut: Bool) async -> ShortcutResult {
+        let keepAwake = !fromShortcut && UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake")
+        let idleTimerWasDisabled = keepAwake && UIApplication.shared.isIdleTimerDisabled
         if keepAwake { UIApplication.shared.isIdleTimerDisabled = true }
         defer { if keepAwake { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled } }
-        for (index, input) in inputs.enumerated() {
-            await process(input, at: index, options: options.arguments, recoverLivePhoto: recoverLivePhotos)
+
+        var result = ShortcutResult()
+        let ids = jobs.prefix(inputs.count).map(\.id)
+        for (id, input) in zip(ids, inputs) {
+            guard let index = jobs.firstIndex(where: { $0.id == id }) else { continue }
+            await process(input, at: index, options: options.arguments, recoverLivePhoto: fromShortcut)
+            let name = jobs[index].name
+            let saved = await saveResult(at: index, returnPhoto: fromShortcut)
+            guard fromShortcut else { continue }
+            guard let (output, data) = saved else {
+                result.failures.append("\(name): \(jobs[index].saveError ?? jobs[index].message)")
+                continue
+            }
+            guard let data else {
+                result.failures.append("\(name) was saved to Photos but couldn’t be returned to Shortcuts.")
+                continue
+            }
+            result.files.append((output.photo.lastPathComponent, data))
+            if output.movie != nil { result.liveCount += 1 }
+            if output.lostMotion { result.lostMotionCount += 1 }
+            if let warning = output.depthWarning { result.depthWarnings.append(warning) }
         }
+        return result
     }
 
     func retrySaving(_ id: UUID) async {
         guard !isBusy, let index = jobs.firstIndex(where: { $0.id == id && $0.saveError != nil }) else { return }
-        await saveResult(at: index)
+        _ = await saveResult(at: index, returnPhoto: false)
     }
 
-    private func saveResult(at index: Int) async {
-        guard let output = jobs[index].result else { return }
+    private func saveResult(at index: Int, returnPhoto: Bool) async -> (output: Output, data: Data?)? {
+        guard let output = jobs[index].result else { return nil }
         jobs[index].saving = true
         jobs[index].saveError = nil
         jobs[index].message = output.movie == nil ? "Saving to Photos…" : "Saving Live Photo…"
-        defer { jobs[index].saving = false }
         do {
             var authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
             if authorization == .notDetermined { authorization = await PHPhotoLibrary.requestAuthorization(for: .addOnly) }
@@ -195,11 +197,25 @@ final class PhotoProcessing: ObservableObject {
                 creation.addResource(with: .photo, fileURL: output.photo, options: nil)
                 if let movie = output.movie { creation.addResource(with: .pairedVideo, fileURL: movie, options: nil) }
             }
-            jobs[index].message = output.movie == nil ? "Saved to Photos" : "Live Photo saved to Photos"
         } catch {
             jobs[index].message = "Couldn’t save to Photos"
             jobs[index].saveError = error.localizedDescription
+            jobs[index].saving = false
+            return nil
         }
+
+        // Photos has committed both resources. Only Shortcuts needs a copy to return.
+        let data = returnPhoto ? (try? Data(contentsOf: output.photo, options: .mappedIfSafe)) : nil
+        try? FileManager.default.removeItem(at: workFolder(for: jobs[index].id))
+        if output.lostMotion || output.depthWarning != nil {
+            if let warning = output.depthWarning, !jobs[index].notes.contains(warning) { jobs[index].notes.append(warning) }
+            jobs[index].result = nil
+            jobs[index].message = output.movie == nil ? "Saved to Photos" : "Live Photo saved to Photos"
+            jobs[index].saving = false
+        } else {
+            jobs.remove(at: index)
+        }
+        return (output, data)
     }
 
     func maintain(_ action: NativeEngine.CacheAction) async throws {
@@ -273,11 +289,11 @@ final class PhotoProcessing: ObservableObject {
             let photo = folder.appendingPathComponent(URL(fileURLWithPath: result.name).lastPathComponent)
             if photo != files.output { try FileManager.default.moveItem(at: files.output, to: photo) }
             try Task.checkCancellation()
-            jobs[index].result = Output(photo: photo, movie: movie, notes: notes, date: asset?.creationDate ?? captureDate,
+            jobs[index].notes = notes
+            jobs[index].result = Output(photo: photo, movie: movie, date: asset?.creationDate ?? captureDate,
                                         location: asset?.location, lostMotion: wasLivePhoto && movie == nil,
                                         depthWarning: result.depthWarning)
             jobs[index].progress = nil
-            await saveResult(at: index)
         } catch {
             try? FileManager.default.removeItem(at: folder)
             jobs[index].failed = true

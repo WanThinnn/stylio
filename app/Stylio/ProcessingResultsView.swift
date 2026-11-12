@@ -10,13 +10,13 @@ struct ProcessingResultsButton: View {
         Button(action: action) {
             Image(systemName: processing.isProcessing ? "tray.and.arrow.down" : "tray")
                 .overlay(alignment: .topTrailing) {
-                    if processing.hasResultErrors {
+                    if processing.hasResultIssues {
                         Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 4, y: -3)
                     }
                 }
         }
         .accessibilityLabel("Processing Results")
-        .accessibilityValue(processing.isProcessing ? Text("Processing") : processing.hasResultErrors ? Text("Contains errors") : Text(""))
+        .accessibilityValue(processing.isProcessing ? Text("Processing") : processing.hasResultIssues ? Text("Contains warnings or errors") : Text(""))
     }
 }
 
@@ -37,11 +37,11 @@ struct ProcessingResultsView: View {
                         ProgressView(value: progress, total: 100)
                             .accessibilityLabel("Processing photo")
                     }
+                    ForEach(Array(job.notes.enumerated()), id: \.offset) { _, note in
+                        Text(note).font(.footnote).foregroundStyle(.secondary)
+                    }
                     if let output = job.result {
                         if resultPreview { ResultThumbnail(url: output.photo) }
-                        ForEach(Array(output.notes.enumerated()), id: \.offset) { _, note in
-                            Text(note).font(.footnote).foregroundStyle(.secondary)
-                        }
                         if let error = job.saveError {
                             Text(error).font(.footnote).foregroundStyle(.red)
                         }
@@ -52,14 +52,19 @@ struct ProcessingResultsView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(processing.isBusy)
+                                ShareLink(items: [output.photo] + (output.movie.map { [$0] } ?? []))
+                                    .buttonStyle(.bordered)
                             }
-                            ShareLink(items: [output.photo] + (output.movie.map { [$0] } ?? []))
-                                .buttonStyle(.bordered)
                             if job.saving { ProgressView() }
                         }
                     }
                 }
                 .padding(.vertical, 4)
+            }
+            .overlay {
+                if processing.jobs.isEmpty {
+                    ContentUnavailableView("All Photos Saved", systemImage: "checkmark.circle")
+                }
             }
             .navigationTitle("Processing Results")
             .navigationBarTitleDisplayMode(.inline)

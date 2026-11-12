@@ -3,26 +3,28 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 
-function downloader({chunks,headers={},cached=null,failPut=false}={}){
+function downloader({chunks,headers={},cached=null,failPut=false,missingLocal=false}={}){
  const source=readFileSync(new URL('../../web/src/core/model-download.js',import.meta.url),'utf8').replaceAll('export ','');
- const events=[],allocations=[],puts=[];let reads=0,requests=0;
+ const events=[],allocations=[],puts=[],urls=[],cacheKeys=[];let reads=0;
  class TrackedBytes extends Uint8Array{
   constructor(value){super(value);if(typeof value==='number')allocations.push({bytes:value,reads});}
  }
- const cache={match:async()=>cached,delete:async()=>true,put:async(_url,response)=>{
-  if(failPut)throw Error('quota');puts.push(new Uint8Array(await response.arrayBuffer()));
+ const cache={match:async()=>cached,delete:async()=>true,put:async(url,response)=>{
+  if(failPut)throw Error('quota');cacheKeys.push(url);puts.push(new Uint8Array(await response.arrayBuffer()));
  }};
  const load=runInNewContext(source+';downloadModelBytes;',{
   Uint8Array:TrackedBytes,Response,AbortController,performance,setTimeout,clearTimeout,
-  console:{warn(){}},fetch:async()=>{
-   requests++;let index=0;
+  console:{warn(){}},fetch:async url=>{
+   urls.push(url);
+   if(missingLocal&&url==='https://test.invalid/model')return new Response('Not found',{status:404});
+   let index=0;
    return {ok:true,headers:new Headers(headers),body:{getReader:()=>({
     async read(){reads++;return index<chunks.length?{done:false,value:chunks[index++]}:{done:true};},
     releaseLock(){},cancel:async()=>{},
    })}};
   },
  });
- return {events,allocations,puts,requests:()=>requests,
+ return {events,allocations,puts,urls,cacheKeys,requests:()=>urls.length,
   load:options=>load('https://test.invalid/model',{cacheStorage:{open:async()=>cache},onProgress:event=>events.push(event),...options})};
 }
 
@@ -37,6 +39,14 @@ test('a valid saved model emits only cache events and never fetches again',async
  const h=downloader({cached:new Response(Uint8Array.of(1,2,3),{headers:{'content-length':'3'}})});
  assert.deepEqual(Array.from(await h.load({expectedBytes:3})),[1,2,3]);
  assert.equal(h.requests(),0);assert.ok(h.events.every(event=>event.source==='cache'));
+});
+
+test('a missing hosted model uses the pinned source and caches under the app asset URL',async()=>{
+ const local='https://test.invalid/model',fallback='https://source.invalid/weights.onnx';
+ const h=downloader({chunks:[Uint8Array.of(1,2,3)],missingLocal:true});
+ assert.deepEqual(Array.from(await h.load({expectedBytes:3,fallbackUrl:fallback})),[1,2,3]);
+ assert.deepEqual(h.urls,[local,fallback]);
+ assert.deepEqual(h.cacheKeys,[local]);
 });
 
 test('truncated and oversized model streams are rejected before storage',async()=>{

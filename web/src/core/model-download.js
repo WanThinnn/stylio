@@ -41,7 +41,7 @@ export function downloadModelBytes(url, options = {}) {
 }
 
 async function downloadModelBytesOnce(url, {
-  onProgress = () => {}, stallTimeoutMs = 30000, cacheStorage = globalThis.caches, expectedBytes = null,
+  onProgress = () => {}, stallTimeoutMs = 30000, cacheStorage = globalThis.caches, expectedBytes = null, fallbackUrl = null,
 } = {}) {
   if(expectedBytes!==null&&(!Number.isSafeInteger(expectedBytes)||expectedBytes<=0))throw Error('Invalid model size');
   let cache = null;
@@ -73,7 +73,12 @@ async function downloadModelBytesOnce(url, {
   try {
     await notify();
     // The explicit asset cache owns reuse. A manual deletion must not silently reload an HTTP-cache copy.
-    const response = await withModelTimeout(fetch(url, {signal: controller.signal, cache: "no-store"}), stallTimeoutMs);
+    const fetchModel = source => withModelTimeout(fetch(source, {signal: controller.signal, cache: "no-store"}), stallTimeoutMs);
+    let response = await fetchModel(url);
+    if (fallbackUrl && response.status === 404) {
+      void response.body?.cancel().catch(() => {});
+      response = await fetchModel(fallbackUrl);
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const length = Number(response.headers.get("content-length"));
     // Content-Length describes compressed bytes, whereas a reader returns decoded bytes.

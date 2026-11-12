@@ -65,7 +65,7 @@ struct SettingsView: View {
                     deviceRow("Clear cache", "Downloaded tools can be removed safely. Photos and preferences are kept.", icon: "externaldrive")
                 }
                 Button(role: .destructive) { confirmReset = true } label: {
-                    deviceRow("Reset Stylio", "Remove history, preferences, downloaded AI models and cached app files.", icon: "trash")
+                    deviceRow("Reset Stylio", "Remove pending results, preferences, downloaded AI models and cached app files.", icon: "trash")
                 }
                 if processing.isMaintaining { ProgressView() }
             }

@@ -121,14 +121,16 @@ export async function createAiPortrait(data,onProgress=()=>{},sourceFile=null,{s
         generatedSelection:generatedSelection?.report??null,fused:null,reason:'no-foreground-guidance'};
     }
 
+    let centerScene;
     if(!suggestedFocus){
       const focus=centerPortraitFocus(gray,width,height);
       if(focus){
+        centerScene=describePortraitScene(gray,width,height,{matte});
         const display=storedPointToDisplay(focus.x,focus.y,orientation.angle,orientation.mirror);
         suggestedFocus={...focus,displayX:display.x,displayY:display.y};
       }
     }
-    const sceneProfile=describePortraitScene(gray,width,height,{focusX:suggestedFocus?.x??.5,focusY:suggestedFocus?.y??.5,matte});
+    const sceneProfile=describePortraitScene(gray,width,height,{focusX:suggestedFocus?.x??.5,focusY:suggestedFocus?.y??.5,matte,centerScene});
     return {gray,subjectReport,foregroundReport,suggestedFocus,sceneProfile,disparityMax:AI_DISPARITY_MAX,width,height,previewRgb,orientation,
       sourceData:data,sourceFile,sourceWidth:w,sourceHeight:h,inferenceWidth:used.width,inferenceHeight:used.height,
       provider:usedProvider,modelId};

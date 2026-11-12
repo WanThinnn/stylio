@@ -15,8 +15,9 @@ Open a photo and tap **Add Styles**, or use **Select** and **Process** for a bat
 The Search tab finds photos by filename, date, album, and media type. On iOS 26
 and later, the Library timeline appears inline when the system tab bar minimizes.
 The Library sort menu also provides the **Year**, **Month**, and **All** views.
-Stylio automatically saves processed photos as new assets in Photos. Open the
-tray icon to check progress, share a result, or retry a failed save.
+Stylio automatically saves processed photos as new assets in Photos and deletes
+the temporary files after Photos confirms the save. The tray shows progress and
+warnings. It keeps files for failed saves so you can share them or retry.
 Stylio bundles the shared JavaScript pipeline from [`web/src/`](../web/src/) and
 runs it in WebKit on the device. The pipeline downloads supported AI models and
 codecs as needed. Settings → On this device manages these downloads and the

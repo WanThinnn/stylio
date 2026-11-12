@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "photographic-style-port-";
-const CACHE_NAME = `${CACHE_PREFIX}v262`;
+const CACHE_NAME = `${CACHE_PREFIX}v264`;
 // Filled by the static release builder. Also refresh older, unversioned clients.
 const RELEASE_ID = "development";
 // Immutable dependency identity, independent of UI/service-worker releases.
@@ -343,8 +343,8 @@ self.addEventListener("fetch", (event) => {
   // retain their existing failure behavior and are never persisted here.
   if (url.origin !== self.location.origin) return;
 
-  if(url.pathname.includes('/vendor/ai-style/')){
-    // Large Suggested Styles ONNX files belong exclusively to the verified
+  if(url.pathname.includes('/vendor/ai-style/')||url.pathname.includes('/vendor/ai-detail/')){
+    // Large Suggested Styles and Sharpen Photo ONNX files belong to the verified
     // model downloader cache. Keep the small manifest/semantic axes/reference
     // diagnostics on the normal versioned app cache so offline re-use does not duplicate weights.
     if(/\.onnx$/.test(url.pathname)){

@@ -1,5 +1,4 @@
-// Curated families; assets are loaded ONLY if a matching verified local model
-// has been packaged at vendor/ai-detail/assets.json. No implicit fake AI fallback.
+// Curated families and their pinned manifest at vendor/ai-detail/assets.json.
 // Model families require different training objectives; labels indicate resource tiers,
 // NOT guaranteed image-quality rankings.
 export const DETAIL_MODELS = Object.freeze({
@@ -19,5 +18,9 @@ export function validateDetailAsset(config){
     ||!/^[a-f0-9]{64}$/.test(config.sha256||'')
     ||!/^[-\w.]+\.onnx$/.test(config.file||''))throw Error('Invalid AI detail asset manifest');
   if(config.channels!==3||config.layout!=='rgb'||config.output!=='rgb')throw Error('Unsupported ONNX detail model layout');
+  if(config.sourceUrl!==undefined){
+    const url=new URL(config.sourceUrl);
+    if(url.protocol!=='https:'||url.username||url.password)throw Error('Invalid AI detail model source URL');
+  }
   return config;
 }

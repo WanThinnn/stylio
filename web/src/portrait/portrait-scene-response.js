@@ -31,7 +31,8 @@ export function centerPortraitFocus(gray,width,height){
   const histogram=new Uint32Array(256);
   for(let y=cy-radius;y<=cy+radius;y++)for(let x=cx-radius;x<=cx+radius;x++)histogram[gray[y*width+x]]++;
   const far=quantile(histogram,.25),near=quantile(histogram,.75);
-  if(near-far<48||gray[cy*width+cx]>far+12)return null;
+  const separation=near-far;
+  if(separation<48||gray[cy*width+cx]>far+separation/4)return null;
 
   const threshold=near-12,patch=Math.max(1,Math.floor(radius/4));
   let nearAtCenter=0;
@@ -52,7 +53,7 @@ export function centerPortraitFocus(gray,width,height){
   return best;
 }
 
-export function describePortraitScene(gray,width,height,{focusX=.5,focusY=.5,matte=null}={}){
+export function describePortraitScene(gray,width,height,{focusX=.5,focusY=.5,matte=null,centerScene=null}={}){
   if(!(gray instanceof Uint8Array)||!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||gray.length!==width*height
     ||![focusX,focusY].every(v=>Number.isFinite(v)&&v>=0&&v<=1))throw Error('Invalid Portrait scene geometry');
   if(matte&&(matte.width!==width||matte.height!==height||!(matte.confidence instanceof Uint8Array)||matte.confidence.length!==gray.length))
@@ -84,6 +85,13 @@ export function describePortraitScene(gray,width,height,{focusX=.5,focusY=.5,mat
   if(!side)return {...base,usable:false,reason:'insufficient-separated-support'};
   const separation=(side==='background'?base.backgroundMedian:base.foregroundMedian*FOREGROUND_RESPONSE)/255;
   if(!(separation>0))return {...base,usable:false,reason:'no-separation'};
+  let targetResponse=COMPLEX_RESPONSE+(ISOLATED_RESPONSE-COMPLEX_RESPONSE)*subjectConfidence;
+  // A depth-only focus correction can increase the measured separation. Keep
+  // the earlier disparity scale when both points have a supported background,
+  // within the scene response already used for isolated subjects.
+  if(side==='background'&&centerScene?.usable&&centerScene.side===side){
+    targetResponse=Math.min(ISOLATED_RESPONSE,Math.max(targetResponse,centerScene.targetResponse*separation/centerScene.separation));
+  }
   return {...base,usable:true,reason:'focus-separated-scene',side,separation,
-    targetResponse:COMPLEX_RESPONSE+(ISOLATED_RESPONSE-COMPLEX_RESPONSE)*subjectConfidence};
+    targetResponse};
 }
