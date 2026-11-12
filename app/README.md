@@ -36,15 +36,16 @@ Set up a shortcut once on the iPhone or iPad:
 2. Let it receive **Images**. Include **Media** or **Files** if you also share
    explicit HEIC/MOV pairs from Files.
 3. Add **Process Photos with Stylio** and set **Photos** to **Shortcut Input**.
-   Its options default to GPU on, Standard, and the three optional AI effects off.
+   Each AI option uses the app setting when left unset.
 
-Then open Photos, select a photo, and choose the shortcut from **Share**. Stylio
-opens to run WebKit, processes the input, and saves a new asset automatically.
-The action returns the processed HEIC for use in later shortcut steps. For a Live
-Photo, use **Current** in the Photos share options so the HEIC can retain its
-pairing identifier. Stylio can use an included MOV or recover matching motion
-from Photos when read access permits. The shortcut reports when a detected Live
-Photo was saved as a still.
+Then open Photos, select a photo, and choose the shortcut from **Share**. The
+action requests background execution, saves a new asset automatically, and
+returns the processed HEIC for use in later shortcut steps. If Photos shares a
+JPEG, Stylio can recover the original HEIC and MOV when the JPEG retains its
+Live Photo identifier and Stylio can read the matching library asset. Use
+**Current** for a Live Photo if **Automatic** removes the pairing identifier.
+The shortcut reports when a detected Live Photo was saved as a still or when
+the requested Lighting Depth effect could not be added.
 
 ## Build from Windows and test on an iPhone
 

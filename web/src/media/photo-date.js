@@ -37,7 +37,11 @@ export function exifDateFields(payload) {
 export function photoCaptureDate(bytes) {
   const d=discoverHeic(bytes);
   if(d.exifItem===null) return null;
-  const fields=exifDateFields(extractItem(bytes,d.iloc,d.exifItem));
+  return captureDateFromExif(extractItem(bytes,d.iloc,d.exifItem));
+}
+
+export function captureDateFromExif(exif) {
+  const fields=exifDateFields(exif);
   const date=fields.original || fields.digitized;
   if(!date || !/^\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}$/.test(date)) return null;
   const original=!!fields.original;

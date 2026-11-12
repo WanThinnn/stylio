@@ -64,10 +64,18 @@ jobs:
           restore-keys: |
             stylio-xcode-v1-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('app/Stylio.xcodeproj/**') }}-
 
+      - name: Cache ONNX Runtime binary
+        if: github.event.client_payload.clean != true && steps.ipa.outputs.cache-hit != 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/stylio-engine-assets
+          key: stylio-ios-engine-v1-${{ hashFiles('web/vendor/ai-portrait/assets.json') }}
+
       - name: Build for iPhone and iPad
         if: steps.ipa.outputs.cache-hit != 'true'
         env:
           SOURCE_SHA: ${{ github.event.client_payload.sha }}
+          STYLIO_ENGINE_CACHE_DIR: ${{ runner.temp }}/stylio-engine-assets
         run: |
           xcodebuild \
             -project app/Stylio.xcodeproj \
@@ -100,7 +108,8 @@ jobs:
           unzip -tq "$ipa"
           engine=Payload/Stylio.app/StylioEngine
           unzip -p "$ipa" "$engine/index.html" "$engine/src/app/native-engine.js" \
-            "$engine/profiles/index.json" "$engine/live-photo-video/template.mov" > /dev/null
+            "$engine/profiles/index.json" "$engine/live-photo-video/template.mov" \
+            "$engine/vendor/ai-portrait/ort-wasm-simd-threaded.jsep.wasm" > /dev/null
 
       - name: Upload device build
         uses: actions/upload-artifact@v4

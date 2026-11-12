@@ -10,6 +10,7 @@ workflows:
         - ~/Library/Caches/stylio-ios/SourcePackages
         - ~/Library/Caches/stylio-ios/CompilationCache.noindex
         - ~/Library/Caches/stylio-ios/ModuleCache.noindex
+        - ~/Library/Caches/stylio-ios/EngineAssets
     scripts:
       - name: Build for iPhone and iPad
         script: |
@@ -28,6 +29,7 @@ workflows:
             cache_dir="$output_dir/Uncached"
           fi
           mkdir -p "$output_dir" "$cache_dir"
+          export STYLIO_ENGINE_CACHE_DIR="$cache_dir/EngineAssets"
 
           printf 'Source commit: %s\n' "$source_sha"
           xcodebuild -version
@@ -62,7 +64,7 @@ workflows:
           zip -qry "$ipa" Payload
           unzip -tq "$ipa"
           engine=Payload/Stylio.app/StylioEngine
-          for resource in index.html src/app/native-engine.js profiles/index.json live-photo-video/template.mov; do
+          for resource in index.html src/app/native-engine.js profiles/index.json live-photo-video/template.mov vendor/ai-portrait/ort-wasm-simd-threaded.jsep.wasm; do
             unzip -p "$ipa" "$engine/$resource" > /dev/null
           done
           mv "$ipa" "$output_dir/Stylio-unsigned.ipa"

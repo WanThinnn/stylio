@@ -4,13 +4,18 @@ import {extractAppleMakerNoteTag} from '../core/exif.js';
 import {writeZip} from '../core/zip.js';
 
 const decode = bytes => new TextDecoder().decode(bytes).replace(/\0+$/, '').trim();
+export function livePhotoIdentifierFromExif(exif) {
+  try {
+    const value = decode(extractAppleMakerNoteTag(exif, 0x11).payload);
+    return /^[\w-]{8,128}$/.test(value) ? value : null;
+  } catch { return null; }
+}
+
 export function photoContentIdentifier(bytes) {
   try {
     const d = discoverHeic(bytes);
     if (d.exifItem === null) return null;
-    const tag = extractAppleMakerNoteTag(extractItem(bytes,d.iloc,d.exifItem),0x11);
-    const value = decode(tag.payload);
-    return /^[\w-]{8,128}$/.test(value) ? value : null;
+    return livePhotoIdentifierFromExif(extractItem(bytes,d.iloc,d.exifItem));
   } catch { return null; }
 }
 function boxes(bytes,start=0,end=bytes.length) {

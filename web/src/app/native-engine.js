@@ -5,11 +5,13 @@ import {createProfileRepository} from './processing/profiles.js';
 import {createProcessingBudget} from './processing/task-queue.js';
 import {t} from '../ui/i18n.js';
 import {AI_STRINGS} from '../ui/ai-strings.js';
-import {movieStyleTracks,photoContentIdentifier,validateLivePair} from '../media/live-photo.js';
+import {livePhotoIdentifierFromExif,movieStyleTracks,photoContentIdentifier,validateLivePair} from '../media/live-photo.js';
 import {addMovieTexture} from '../media/native-movie-texture.js';
 import {hasTexture} from '../styles/texture.js';
 import {discoverHeic} from '../core/heif.js';
-import {photoCaptureDate} from '../media/photo-date.js';
+import {captureDateFromExif,photoCaptureDate} from '../media/photo-date.js';
+import {extractRasterExif} from '../raster/exif.js';
+import {imageFormat} from '../media/image-format.js';
 
 async function readFile(route, name) {
   const response = await fetch(route, {cache: 'no-store'});
@@ -50,6 +52,7 @@ export function createNativeEngine(notify) {
     const cleanups = [];
     let output;
     let failure;
+    let portraitApplied = false;
     const ui = {
       set(message, kind) {
         if (kind === 'err') failure = message;
@@ -65,7 +68,7 @@ export function createNativeEngine(notify) {
       cleanup(dispose) { cleanups.push(dispose); },
       cancelAi: () => () => {},
       aiBusy() {},
-      aiView() {},
+      aiView(applied) { portraitApplied = applied; },
       portraitPreview() {},
       metadata() {},
       portraitAdvice(message) { ui.note(message, 'portrait'); },
@@ -106,7 +109,10 @@ export function createNativeEngine(notify) {
       }
 
       await writeFile(`${route}/output`, output);
-      return {name: output.name, movie, notes: [...notes.values()]};
+      const depthWarning = options.portrait === true && !portraitApplied
+        ? notes.get('ai-error') || notes.get('ai') || notes.get('compatibility') || 'The photo has no compatible Lighting Depth result.'
+        : null;
+      return {name: output.name, movie, notes: [...notes.values()], depthWarning};
     } finally {
       await Promise.allSettled(cleanups.map(async dispose => dispose()));
     }
@@ -118,10 +124,15 @@ export function createNativeEngine(notify) {
 export async function inspectLivePhoto(route) {
   const file = await readFile(route, 'shared photo');
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const identifier = photoContentIdentifier(bytes);
-  if (!identifier) return null;
-  const capture = photoCaptureDate(bytes);
-  return {identifier, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
+  const format = imageFormat(bytes);
+  if (format !== 'heic' && format !== 'jpeg') return null;
+  try {
+    const exif = format === 'jpeg' ? extractRasterExif(bytes) : null;
+    const identifier = format === 'jpeg' ? livePhotoIdentifierFromExif(exif) : photoContentIdentifier(bytes);
+    if (!identifier) return null;
+    const capture = format === 'jpeg' ? captureDateFromExif(exif) : photoCaptureDate(bytes);
+    return {identifier, format, date: capture?.date ?? null, timestamp: capture?.timestamp ?? null};
+  } catch { return null; }
 }
 
 export function livePhotoDisposition(source, output, movie) {

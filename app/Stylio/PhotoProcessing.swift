@@ -66,12 +66,14 @@ final class PhotoProcessing: ObservableObject {
         let date: Date?
         let location: CLLocation?
         let lostMotion: Bool
+        let depthWarning: String?
     }
 
     struct ShortcutResult {
         var files: [(name: String, data: Data)] = []
         var liveCount = 0
         var lostMotionCount = 0
+        var depthWarnings: [String] = []
         var failures: [String] = []
     }
 
@@ -127,6 +129,7 @@ final class PhotoProcessing: ObservableObject {
                 result.files.append((output.photo.lastPathComponent, data))
                 if output.movie != nil { result.liveCount += 1 }
                 if output.lostMotion { result.lostMotionCount += 1 }
+                if let warning = output.depthWarning { result.depthWarnings.append(warning) }
             } catch {
                 result.failures.append("\(job.name) was saved to Photos but couldn’t be returned to Shortcuts.")
             }
@@ -162,8 +165,9 @@ final class PhotoProcessing: ObservableObject {
 
     private func run(_ inputs: [Input], options: PhotoProcessingOptions, recoverLivePhotos: Bool) async {
         let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
-        if UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake") { UIApplication.shared.isIdleTimerDisabled = true }
-        defer { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled }
+        let keepAwake = !recoverLivePhotos && UserDefaults.standard.bool(forKey: "stylio.keepScreenAwake")
+        if keepAwake { UIApplication.shared.isIdleTimerDisabled = true }
+        defer { if keepAwake { UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled } }
         for (index, input) in inputs.enumerated() {
             await process(input, at: index, options: options.arguments, recoverLivePhoto: recoverLivePhotos)
         }
@@ -226,20 +230,29 @@ final class PhotoProcessing: ObservableObject {
             var asset: PHAsset? = if case .photo(let asset) = input { asset } else { nil }
             var wasLivePhoto = files.movie != nil || asset?.mediaSubtypes.contains(.photoLive) == true
             var captureDate: Date?
-            if recoverLivePhoto, files.movie == nil,
-               ["heic", "heif"].contains(files.input.pathExtension.lowercased()),
-               let info = try await engine.inspectLivePhoto(files.input) {
+            var sourceName = input.name
+            if recoverLivePhoto, let info = try await engine.inspectLivePhoto(files.input), files.movie == nil || info.isJPEG {
                 wasLivePhoto = true
                 captureDate = info.captureDate
                 jobs[index].message = "Finding the original Live Photo motion…"
-                let motion = folder.appendingPathComponent("original.mov")
+                let motion = folder.appendingPathComponent("recovered.mov")
                 if let match = try await ShortcutLivePhotoLookup.copyMotion(for: info, filename: input.name, to: motion) {
-                    asset = match
-                    files = ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output)
+                    if !info.isJPEG {
+                        asset = match
+                        files = ProcessingFiles(input: files.input, movie: motion, movieOutput: files.movieOutput, output: files.output)
+                    } else if let original = try await recoverOriginalStill(match, identifier: info.identifier, in: folder) {
+                        asset = match
+                        sourceName = original.name
+                        try? FileManager.default.removeItem(at: files.input)
+                        if let movie = files.movie { try? FileManager.default.removeItem(at: movie) }
+                        files = ProcessingFiles(input: original.url, movie: motion, movieOutput: files.movieOutput, output: files.output)
+                    } else {
+                        try? FileManager.default.removeItem(at: motion)
+                    }
                 }
             }
             try Task.checkCancellation()
-            let result = try await engine.process(files, name: input.name, options: options) { [weak self] message, progress in
+            let result = try await engine.process(files, name: sourceName, options: options) { [weak self] message, progress in
                 if let message { self?.jobs[index].message = message }
                 if let progress { self?.jobs[index].progress = min(max(progress, 0), 100) }
             }
@@ -261,7 +274,8 @@ final class PhotoProcessing: ObservableObject {
             if photo != files.output { try FileManager.default.moveItem(at: files.output, to: photo) }
             try Task.checkCancellation()
             jobs[index].result = Output(photo: photo, movie: movie, notes: notes, date: asset?.creationDate ?? captureDate,
-                                        location: asset?.location, lostMotion: wasLivePhoto && movie == nil)
+                                        location: asset?.location, lostMotion: wasLivePhoto && movie == nil,
+                                        depthWarning: result.depthWarning)
             jobs[index].progress = nil
             await saveResult(at: index)
         } catch {
@@ -270,6 +284,22 @@ final class PhotoProcessing: ObservableObject {
             jobs[index].message = error.localizedDescription
             jobs[index].progress = nil
         }
+    }
+
+    private func recoverOriginalStill(_ asset: PHAsset, identifier: String, in folder: URL) async throws -> (url: URL, name: String)? {
+        guard let photo = PhotoLibrary.originalPhoto(in: PHAssetResource.assetResources(for: asset)) else { return nil }
+        let still = folder.appendingPathComponent("recovered.heic")
+        do {
+            try await Self.write(photo, to: still)
+            if let info = try await engine.inspectLivePhoto(still), !info.isJPEG, info.identifier == identifier {
+                return (still, photo.originalFilename)
+            }
+        } catch {
+            // Process the shared JPEG if its original resource is unavailable.
+        }
+        try? FileManager.default.removeItem(at: still)
+        try Task.checkCancellation()
+        return nil
     }
 
     private func workFolder(for id: UUID) -> URL {

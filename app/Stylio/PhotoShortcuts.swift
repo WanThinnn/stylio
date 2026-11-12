@@ -18,28 +18,27 @@ struct ProcessPhotosIntent: AppIntent {
         categoryName: "Photos"
     )
 
-    // WebKit needs the application active while processing and downloading models.
-    static let openAppWhenRun = true
+    static let openAppWhenRun = false
     @available(iOS 26.0, *)
-    static var supportedModes: IntentModes { .foreground(.immediate) }
+    static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Photos", supportedTypeIdentifiers: ["public.image", "com.apple.quicktime-movie"])
     var photos: [IntentFile]
 
-    @Parameter(title: "GPU Acceleration", default: true)
-    var gpu: Bool
+    @Parameter(title: "GPU Acceleration", description: "Uses the Stylio setting when left unset.")
+    var gpu: Bool?
 
-    @Parameter(title: "Lighting Depth Effect", default: false)
-    var portrait: Bool
+    @Parameter(title: "Lighting Depth Effect", description: "Uses the Stylio setting when left unset.")
+    var portrait: Bool?
 
-    @Parameter(title: "Sharpen Photo", default: false)
-    var detail: Bool
+    @Parameter(title: "Sharpen Photo", description: "Uses the Stylio setting when left unset.")
+    var detail: Bool?
 
-    @Parameter(title: "Adaptive Styles", default: false)
-    var style: Bool
+    @Parameter(title: "Adaptive Styles", description: "Uses the Stylio setting when left unset.")
+    var style: Bool?
 
-    @Parameter(title: "AI Model", default: .standard)
-    var model: PhotoAIModel
+    @Parameter(title: "AI Model", description: "Uses the Stylio setting when left unset.")
+    var model: PhotoAIModel?
 
     static var parameterSummary: some ParameterSummary {
         Summary("Process \(\.$photos) with Stylio") {
@@ -72,7 +71,10 @@ struct ProcessPhotosIntent: AppIntent {
         }
         let staged = try await withTaskCancellationHandler { try await staging.value } onCancel: { staging.cancel() }
         try Task.checkCancellation()
-        let options = PhotoProcessingOptions(gpu: gpu, portrait: portrait, detail: detail, style: style, model: model)
+        let settings = PhotoProcessingOptions.current
+        let options = PhotoProcessingOptions(gpu: gpu ?? settings.gpu, portrait: portrait ?? settings.portrait,
+                                             detail: detail ?? settings.detail, style: style ?? settings.style,
+                                             model: model ?? settings.model)
         let result = try await PhotoProcessing.shared.runShortcut(files: staged, options: options)
         guard !result.files.isEmpty else { throw ShortcutFailure(message: result.failures.first ?? "No photo was saved.") }
 
@@ -80,6 +82,8 @@ struct ProcessPhotosIntent: AppIntent {
         let dialog: IntentDialog
         if !result.failures.isEmpty {
             dialog = "Saved \(files.count) to Photos. \(result.failures.count) didn’t complete. Open the results tray in Stylio for details."
+        } else if let reason = result.depthWarnings.first {
+            dialog = "Saved \(files.count) to Photos. Lighting Depth wasn’t added to \(result.depthWarnings.count): \(reason)"
         } else if result.lostMotionCount > 0 {
             dialog = "Saved \(files.count) to Photos. \(result.lostMotionCount) Live Photos were saved as stills."
         } else if result.liveCount == files.count {
@@ -100,6 +104,9 @@ struct ProcessPhotosIntent: AppIntent {
         }
         if let type = file.type, type.conforms(to: .heic) || type.conforms(to: .heif) {
             return (safeName as NSString).deletingPathExtension + "." + (type.preferredFilenameExtension ?? "heic")
+        }
+        if file.type?.conforms(to: .jpeg) == true {
+            return (safeName as NSString).deletingPathExtension + ".jpg"
         }
         if ext.isEmpty, let inferred = file.type?.preferredFilenameExtension ?? file.fileURL?.pathExtension, !inferred.isEmpty {
             return safeName + "." + inferred

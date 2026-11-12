@@ -89,9 +89,17 @@ test('native export can add the donor Texture track while keeping the paired vid
 
 test('native engine inspects a shared still for its Live Photo identifier',async t=>{
   const source=pairedPhoto('shortcut-live-identifier');
-  t.mock.method(globalThis,'fetch',async route=>new Response(route==='/probes/paired'?source:new Uint8Array(8)));
+  const graph=discoverHeic(source);
+  const exif=extractItem(source,graph.iloc,graph.exifItem).subarray(4);
+  const jpeg=concat([Uint8Array.of(255,216,255,225),be(exif.length+2,2),exif,Uint8Array.of(255,217)]);
+  const photos=new Map([['/probes/paired',source],['/probes/converted',jpeg]]);
+  t.mock.method(globalThis,'fetch',async route=>new Response(photos.get(route)??Uint8Array.of(255,216,255,217)));
   const engine=createNativeEngine(()=>{});
-  assert.equal((await engine.inspectLivePhoto('/probes/paired')).identifier,'shortcut-live-identifier');
+  for(const [route,format] of [['/probes/paired','heic'],['/probes/converted','jpeg']]){
+    const info=await engine.inspectLivePhoto(route);
+    assert.equal(info.identifier,'shortcut-live-identifier');
+    assert.equal(info.format,format);
+  }
   assert.equal(await engine.inspectLivePhoto('/probes/unpaired'),null);
 });
 

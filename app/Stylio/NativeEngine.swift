@@ -126,11 +126,13 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
         let name: String
         let movie: Movie
         let notes: [String]
+        let depthWarning: String?
     }
 
     struct LivePhotoInfo {
         let identifier: String
         let captureDate: Date?
+        let isJPEG: Bool
     }
 
     enum CacheAction: Equatable { case update, clear, reset }
@@ -195,7 +197,8 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
               FileManager.default.fileExists(atPath: files.output.path) else {
             throw EngineError.invalidResult
         }
-        return Result(name: name, movie: movie, notes: info["notes"] as? [String] ?? [])
+        return Result(name: name, movie: movie, notes: info["notes"] as? [String] ?? [],
+                      depthWarning: info["depthWarning"] as? String)
     }
 
     func maintain(_ action: CacheAction) async throws {
@@ -237,7 +240,7 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
             formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
             date = formatter.date(from: localDate)
         }
-        return LivePhotoInfo(identifier: identifier, captureDate: date)
+        return LivePhotoInfo(identifier: identifier, captureDate: date, isJPEG: result["format"] as? String == "jpeg")
     }
 
     private func readyView() async throws -> WKWebView {
