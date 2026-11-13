@@ -238,6 +238,13 @@
   display: none
 }
 
+.history-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  column-gap: 18px
+}
+
 .empty-state {
   padding: 52px 16px;
   text-align: center;

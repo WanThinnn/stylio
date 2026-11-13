@@ -55,33 +55,19 @@ struct ProcessPhotosIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<[IntentFile]> {
-        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: temporary) }
-
-        let staging = Task.detached(priority: .userInitiated) { [photos] in
-            try photos.enumerated().map { index, file in
-                try Task.checkCancellation()
-                let folder = temporary.appendingPathComponent(String(index), isDirectory: true)
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let destination = folder.appendingPathComponent(Self.filename(for: file))
-                if let source = file.fileURL {
-                    try PhotoProcessing.copyImported(source, to: destination)
-                } else {
-                    try file.data.write(to: destination)
-                }
-                return destination
-            }
-        }
-        let staged = try await withTaskCancellationHandler { try await staging.value } onCancel: { staging.cancel() }
         try Task.checkCancellation()
         let settings = PhotoProcessingOptions.current
         let options = PhotoProcessingOptions(gpu: gpu ?? settings.gpu, portrait: portrait ?? settings.portrait,
                                              detail: detail ?? settings.detail, style: style ?? settings.style,
                                              model: model ?? settings.model)
-        let result = try await PhotoProcessing.shared.runShortcut(files: staged, options: options)
-        guard !result.files.isEmpty else { throw ShortcutFailure(message: result.failures.first ?? "No photo was saved.") }
+        let result = try await PhotoProcessing.shared.runShortcut(files: photos.map { ($0, Self.filename(for: $0)) }, options: options)
+        guard result.savedCount > 0 else { throw ShortcutFailure(message: result.failures.first ?? "No photo was saved.") }
 
-        let files = result.files.map { IntentFile(data: $0.data, filename: $0.name, type: .heic) }
+        let files = result.files.map {
+            var file = IntentFile(fileURL: $0.url, filename: $0.name, type: .heic)
+            file.removedOnCompletion = true
+            return file
+        }
         await ProcessingNotifications.post(result)
         return .result(value: files)
     }

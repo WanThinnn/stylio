@@ -2,7 +2,7 @@
 import {describeInWorker} from '../../media/heic-processing.js';
 import {formatBytes} from '../result-metadata.js';
 import {confirmAction} from '../confirm-dialog.js';
-export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCandidates,livePhotos,liveMovies,aiFeatures,refreshHistoryButton,shell,historyStore,previewEnabled=()=>true,preferences}){
+export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCandidates,livePhotos,liveMovies,aiFeatures,refreshHistoryButton,shell,historyStore,previewEnabled=()=>true,preferences,updateReadyPhoto}){
   const detailIcon=key=>({
     'group.details':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9"/><circle cx="18" cy="17" r="2"/></svg>',
     'group.processing':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h7m4 0h5M4 12h3m4 0h9M4 17h9m4 0h3"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="17" r="2"/></svg>',
@@ -34,6 +34,8 @@ export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCand
     });
     el.querySelector('.status').setAttribute('role','status');
     const cleanups=new Set(),downloadedFiles=new WeakSet(),savedFiles=new WeakSet();let disposed=false;
+    const syncReadyPhoto=()=>updateReadyPhoto?.(historyId,
+      !disposed&&ui.resultState==='ready'&&!ui.outputPendingState?lastOutput:null);
     const ensureDetails=()=>{
       let details=el.querySelector('.result-details');
       if(details)return details;
@@ -118,6 +120,7 @@ export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCand
       progress(value){presentation?.progress?.(value);},
       dispose(){
         if(disposed)return;disposed=true;
+        syncReadyPhoto();
         presentation?.dispose();
         void historyStore?.remove?.(historyId);
         for(const cleanup of cleanups)cleanup();cleanups.clear();resultCleanups.delete(ui.dispose);
@@ -188,6 +191,7 @@ export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCand
         this.outputPendingState=pending;el.querySelector('.act').setAttribute('aria-busy',String(pending));
         for(const button of el.querySelectorAll('.act button'))button.disabled=pending;
         for(const link of el.querySelectorAll('.act a')){link.setAttribute('aria-disabled',String(pending));link.tabIndex=pending?-1:0;}
+        syncReadyPhoto();
       },
       output(file,{metadata=true,persist=true}={}) {
         if(disposed)return;
@@ -232,6 +236,7 @@ export function createResultView({list,T,aiText,resultCleanups,resultUrls,aiCand
       },
       set(text, cls) {
         this.resultState=cls==='queued'?'queued':cls==='ok'?'ready':cls==='err'?'failed':cls==='info'?'info':'processing';
+        syncReadyPhoto();
         this.resultStatus=cls==='ok'?T('st.ready'):text;
         presentation?.update(this.resultState,this.resultStatus);
         remove.disabled=!['ok','err','info'].includes(cls);

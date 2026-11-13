@@ -222,6 +222,13 @@ final class NativeEngine: NSObject, WKScriptMessageHandler, WKNavigationDelegate
     private var isReady = false
     private var progress: ((String?, Double?) -> Void)?
 
+    var wasInterrupted: Bool {
+        guard let error = startupError as? EngineError, case .interrupted = error else { return false }
+        return true
+    }
+
+    func recycle() async { await stop() }
+
     func process(
         _ files: ProcessingFiles,
         name: String,

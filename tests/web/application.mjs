@@ -91,6 +91,46 @@ test('application initializes one shared session and supplies live language/sett
   assert.ok(h.calls.some(([type,value])=>type==='worker'&&value==='WARM_CACHE'));
 });
 
+test('History shares ready photos in one request and leaves them available after cancel or failure',async()=>{
+  const shares=[];
+  let acceptBatch=true,finishShare;
+  const h=harness({nav:{canShare:()=>acceptBatch,share:({files})=>{
+    shares.push(Array.from(files));
+    return new Promise((_,reject)=>{finishShare=reject;});
+  }}});
+  await h.start();
+  const button=h.node('save-all-photos'),status=h.node('save-all-status');
+  const {updateReadyPhoto}=h.captured.results;
+  const photo=name=>new File(['heic'],name,{type:'image/heic'});
+  const first=photo('first.heic'),original=photo('original.heic'),updated=photo('updated.heic');
+  assert.equal(button.hidden,true);
+  updateReadyPhoto('first',first);
+  assert.equal(button.hidden,true);
+  updateReadyPhoto('second',original);
+  assert.equal(button.hidden,false);
+  updateReadyPhoto('second',null);
+  assert.equal(button.hidden,true);
+  updateReadyPhoto('second',updated);
+
+  const pending=button.fire('click');
+  assert.equal(button.disabled,true);
+  await button.fire('click');
+  assert.deepEqual(shares,[[first,updated]]);
+  finishShare(Object.assign(Error('Cancelled'),{name:'AbortError'}));
+  await pending;
+  assert.equal(button.disabled,false);
+  assert.equal(status.hidden,true);
+
+  acceptBatch=false;
+  await button.fire('click');
+  assert.deepEqual(shares,[[first,updated]]);
+  assert.equal(status.textContent,'shell.batchshareblocked');
+  assert.equal(status.hidden,false);
+  updateReadyPhoto('first',null);
+  assert.equal(button.hidden,true);
+  assert.equal(status.hidden,true);
+});
+
 test('separate picker/drop batches remain serialized and cache cleanup stays locked while queued',async()=>{
   const h=harness({manualQueue:true});await h.start();
   h.node('file').files=['first'];await h.node('file').fire('change');

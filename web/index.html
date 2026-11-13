@@ -205,12 +205,17 @@ html[data-theme="dark"] .launch-icon-background{fill:url(#launch-dark)}html[data
   <div class="history-actions">
     <h2 data-i18n="h.history">Processing history</h2>
     <div class="history-tools">
+    <button id="save-all-photos" class="history-clear" type="button" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M7 10H5v11h14V10h-2"/></svg>
+      <span data-i18n="btn.saveallphotos">Save all to Photos</span>
+    </button>
     <button id="clear-history" class="history-clear" type="button" hidden>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7"/></svg>
       <span data-i18n="btn.clearhistory">Clear history</span>
     </button>
     </div>
   </div>
+  <p id="save-all-status" class="queue-note" role="status" hidden></p>
   <p id="history-search-summary" class="search-summary" role="status" hidden></p>
   <p id="history-queue-summary" class="queue-summary" role="status" hidden></p>
   <p id="history-queue-note" class="queue-note" data-i18n="shell.queuerestore" hidden>The queue runs while the app is open. If iOS closes the app, select unfinished photos again.</p>

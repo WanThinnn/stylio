@@ -1,3 +1,4 @@
+import AppIntents
 import Combine
 import CoreLocation
 import Foundation
@@ -36,15 +37,39 @@ struct PhotoProcessingOptions {
 final class PhotoProcessing: ObservableObject {
     static let shared = PhotoProcessing()
 
-    enum Input {
+    private enum ImportedFile: Sendable {
+        case url(URL)
+        case shortcut(IntentFile, name: String)
+
+        var name: String {
+            switch self {
+            case .url(let url): url.lastPathComponent
+            case .shortcut(_, let name): name
+            }
+        }
+
+        func copy(to destination: URL) throws {
+            switch self {
+            case .url(let url): try PhotoProcessing.copyImported(url, to: destination)
+            case .shortcut(let file, _):
+                if let url = file.fileURL {
+                    try PhotoProcessing.copyImported(url, to: destination)
+                } else {
+                    try file.data.write(to: destination)
+                }
+            }
+        }
+    }
+
+    private enum Input {
         case photo(PHAsset)
-        case file(URL, movie: URL?)
+        case file(ImportedFile, movie: ImportedFile?)
 
         var name: String {
             switch self {
             case .photo(let asset):
                 PhotoLibrary.originalPhoto(in: PHAssetResource.assetResources(for: asset))?.originalFilename ?? "Photo"
-            case .file(let url, _): url.lastPathComponent
+            case .file(let file, _): file.name
             }
         }
     }
@@ -72,7 +97,7 @@ final class PhotoProcessing: ObservableObject {
     }
 
     struct BatchResult {
-        var files: [(name: String, data: Data)] = []
+        var files: [(name: String, url: URL)] = []
         var savedCount = 0
         var liveCount = 0
         var lostMotionCount = 0
@@ -104,11 +129,12 @@ final class PhotoProcessing: ObservableObject {
 
     private let engine = NativeEngine()
     private let workDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("StylioProcessing", isDirectory: true)
+    private let shortcutResults = FileManager.default.temporaryDirectory.appendingPathComponent("StylioShortcutResults", isDirectory: true)
 
     private init() { try? FileManager.default.removeItem(at: workDirectory) }
 
     func start(assets: [PHAsset], files: [URL]) throws {
-        let inputs = try beginBatch(assets: assets, files: files)
+        let inputs = try beginBatch(assets: assets, files: files.map(ImportedFile.url))
         let options = PhotoProcessingOptions.current
         Task {
             defer { isProcessing = false }
@@ -119,27 +145,46 @@ final class PhotoProcessing: ObservableObject {
         }
     }
 
-    func runShortcut(files: [URL], options: PhotoProcessingOptions) async throws -> BatchResult {
-        let inputs = try beginBatch(assets: [], files: files)
+    func runShortcut(files: [(IntentFile, String)], options: PhotoProcessingOptions) async throws -> BatchResult {
+        guard !isBusy else { throw ProcessingError.busy }
+        try FileManager.default.createDirectory(at: shortcutResults, withIntermediateDirectories: true)
+        discardExpiredShortcutResults()
+        let inputs = try beginBatch(assets: [], files: files.map { .shortcut($0.0, name: $0.1) })
         defer { isProcessing = false }
         let result = await run(inputs, options: options, fromShortcut: true)
+        await engine.recycle()
+        if Task.isCancelled {
+            for file in result.files { try? FileManager.default.removeItem(at: file.url) }
+        }
         try Task.checkCancellation()
         return result
     }
 
-    private func beginBatch(assets: [PHAsset], files: [URL]) throws -> [Input] {
+    private func discardExpiredShortcutResults() {
+        // A killed Shortcut may leave exports that it could not clean up.
+        let expired = Date().addingTimeInterval(-24 * 60 * 60)
+        let files = try? FileManager.default.contentsOfDirectory(at: shortcutResults, includingPropertiesForKeys: [.contentModificationDateKey])
+        for file in files ?? [] {
+            if let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               date < expired {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    private func beginBatch(assets: [PHAsset], files: [ImportedFile]) throws -> [Input] {
         guard !isBusy else { throw ProcessingError.busy }
-        let (movies, photos) = files.reduce(into: ([URL](), [URL]())) { groups, file in
-            if file.pathExtension.lowercased() == "mov" { groups.0.append(file) }
+        let (movies, photos) = files.reduce(into: ([ImportedFile](), [ImportedFile]())) { groups, file in
+            if (file.name as NSString).pathExtension.lowercased() == "mov" { groups.0.append(file) }
             else { groups.1.append(file) }
         }
-        var unpairedMovies = Set(movies)
+        var unpairedMovies = Set(movies.indices)
         let imported: [Input] = photos.map { photo in
-            let stem = photo.deletingPathExtension().lastPathComponent.lowercased()
-            let matching = movies.filter { unpairedMovies.contains($0) && $0.deletingPathExtension().lastPathComponent.lowercased() == stem }
-            let movie = matching.count == 1 ? matching.first : photos.count == 1 && movies.count == 1 ? movies.first : nil
-            if let movie { unpairedMovies.remove(movie) }
-            return .file(photo, movie: movie)
+            let stem = (photo.name as NSString).deletingPathExtension.lowercased()
+            let matching = unpairedMovies.filter { (movies[$0].name as NSString).deletingPathExtension.lowercased() == stem }
+            let index = matching.count == 1 ? matching.first : photos.count == 1 && movies.count == 1 ? unpairedMovies.first : nil
+            if let index { unpairedMovies.remove(index) }
+            return .file(photo, movie: index.map { movies[$0] })
         }
         guard unpairedMovies.isEmpty else { throw ProcessingError.unsupportedMovie }
         let inputs = assets.map(Input.photo) + imported
@@ -161,12 +206,20 @@ final class PhotoProcessing: ObservableObject {
 
         var result = BatchResult()
         let ids = jobs.prefix(inputs.count).map(\.id)
-        for (id, input) in zip(ids, inputs) {
+        for (offset, entry) in zip(ids, inputs).enumerated() {
+            if Task.isCancelled { break }
+            let (id, input) = entry
             guard let index = jobs.firstIndex(where: { $0.id == id }) else { continue }
+            if fromShortcut && offset > 0 && offset.isMultiple(of: 4) { await engine.recycle() }
             await process(input, at: index, options: options.arguments, recoverLivePhoto: fromShortcut)
+            if fromShortcut && jobs[index].failed && engine.wasInterrupted && !Task.isCancelled {
+                await engine.recycle()
+                jobs[index].failed = false
+                await process(input, at: index, options: options.arguments, recoverLivePhoto: true)
+            }
             let name = jobs[index].name
             let saved = await saveResult(at: index, returnPhoto: fromShortcut)
-            guard let (output, data) = saved else {
+            guard let (output, file) = saved else {
                 result.failures.append("\(name): \(jobs[index].saveError ?? jobs[index].message)")
                 continue
             }
@@ -176,11 +229,11 @@ final class PhotoProcessing: ObservableObject {
             if output.depthWarning != nil { result.depthWarningCount += 1 }
             if output.usedSharedJPEG { result.sharedJPEGCount += 1 }
             guard fromShortcut else { continue }
-            guard let data else {
+            guard let file else {
                 result.failures.append("\(name) was saved to Photos but couldn’t be returned to Shortcuts.")
                 continue
             }
-            result.files.append((output.photo.lastPathComponent, data))
+            result.files.append((output.photo.lastPathComponent, file))
         }
         return result
     }
@@ -190,7 +243,7 @@ final class PhotoProcessing: ObservableObject {
         _ = await saveResult(at: index, returnPhoto: false)
     }
 
-    private func saveResult(at index: Int, returnPhoto: Bool) async -> (output: Output, data: Data?)? {
+    private func saveResult(at index: Int, returnPhoto: Bool) async -> (output: Output, file: URL?)? {
         guard let output = jobs[index].result else { return nil }
         jobs[index].saving = true
         jobs[index].saveError = nil
@@ -213,8 +266,17 @@ final class PhotoProcessing: ObservableObject {
             return nil
         }
 
-        // Photos has committed both resources. Only Shortcuts needs a copy to return.
-        let data = returnPhoto ? (try? Data(contentsOf: output.photo, options: .mappedIfSafe)) : nil
+        // Keep the HEIC on disk until Shortcuts finishes consuming its result.
+        var file: URL?
+        if returnPhoto {
+            let destination = shortcutResults.appendingPathComponent(jobs[index].id.uuidString).appendingPathExtension("heic")
+            do {
+                try FileManager.default.moveItem(at: output.photo, to: destination)
+                file = destination
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+            }
+        }
         try? FileManager.default.removeItem(at: workFolder(for: jobs[index].id))
         if output.lostMotion || output.depthWarning != nil {
             if let warning = output.depthWarning, !jobs[index].notes.contains(warning) { jobs[index].notes.append(warning) }
@@ -224,7 +286,7 @@ final class PhotoProcessing: ObservableObject {
         } else {
             jobs.remove(at: index)
         }
-        return (output, data)
+        return (output, file)
     }
 
     func maintain(_ action: NativeEngine.CacheAction) async throws {
@@ -414,11 +476,14 @@ final class PhotoProcessing: ObservableObject {
             if let movie { try await Self.write(movie, to: movieDestination) }
             return ProcessingFiles(input: still, movie: movie == nil ? nil : movieDestination, movieOutput: movieOutput, output: output)
         case .file(let file, let movie):
-            let still = folder.appendingPathComponent("input").appendingPathExtension(file.pathExtension)
-            try await Task.detached(priority: .userInitiated) {
-                try Self.copyImported(file, to: still)
-                if let movie { try Self.copyImported(movie, to: movieDestination) }
-            }.value
+            let still = folder.appendingPathComponent("input").appendingPathExtension((file.name as NSString).pathExtension)
+            let copy = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                try autoreleasepool { try file.copy(to: still) }
+                try Task.checkCancellation()
+                if let movie { try autoreleasepool { try movie.copy(to: movieDestination) } }
+            }
+            try await withTaskCancellationHandler { try await copy.value } onCancel: { copy.cancel() }
             return ProcessingFiles(input: still, movie: movie == nil ? nil : movieDestination, movieOutput: movieOutput, output: output)
         }
     }

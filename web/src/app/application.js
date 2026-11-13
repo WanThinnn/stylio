@@ -64,6 +64,10 @@ export function startApplication(){
     try{localStorage.setItem('depth-gpu-acceleration',gpuAcceleration.checked?'on':'off');}catch{}
   });
   const clearHistory = $('clear-history');
+  const saveAllPhotos = $('save-all-photos');
+  const saveAllStatus = $('save-all-status');
+  const readyPhotos = new Map();
+  let sharingPhotos = false;
   const historyStore=createHistoryStore();
   let historyEpoch=0;
   const previewEnabled=()=>$('result-preview')?.checked!==false;
@@ -78,10 +82,32 @@ export function startApplication(){
   function refreshHistoryButton() {
     clearHistory.hidden = !list.childElementCount;
     clearHistory.disabled = pendingTasks > 0;
+    saveAllPhotos.hidden = readyPhotos.size < 2 || typeof navigator.share !== 'function';
+    saveAllPhotos.disabled = sharingPhotos;
     if($('refresh-app'))$('refresh-app').disabled=pendingTasks>0||clearingAssets||fullCleaning||document.documentElement?.dataset.updating==='true';
     clearAssets.disabled=!browserReady||pendingTasks>0||clearingAssets||fullCleaning||aiCandidates.some(candidate=>candidate.ui.portraitPending);
     fullCleanup.disabled=!browserReady||pendingTasks>0||clearingAssets||fullCleaning||aiCandidates.some(candidate=>candidate.ui.portraitPending);
   }
+  saveAllPhotos.addEventListener('click',async()=>{
+    if(sharingPhotos||readyPhotos.size<2)return;
+    const files=[...readyPhotos.values()];
+    saveAllStatus.hidden=true;
+    sharingPhotos=true;
+    refreshHistoryButton();
+    try{
+      if(navigator.canShare&&!navigator.canShare({files}))throw Error('Batch file sharing unavailable');
+      await navigator.share({files});
+    }catch(error){
+      if(error?.name!=='AbortError'){
+        saveAllStatus.dataset.i18n='shell.batchshareblocked';
+        saveAllStatus.textContent=T('shell.batchshareblocked');
+        saveAllStatus.hidden=false;
+      }
+    }finally{
+      sharingPhotos=false;
+      refreshHistoryButton();
+    }
+  });
   function queueTask(task,lane) {
     if(document.documentElement?.dataset.updating==='true')return Promise.resolve();
     return queue.enqueue([{task,lane}]).catch(error=>console.warn('Queued task failed',error));
@@ -232,7 +258,14 @@ export function startApplication(){
   const {liveMovies,livePhotos,attachMovie,handleMovie}=createLivePhotoSession({T});
   const profiles=createProfileRepository();
   const {ensureProfileIndex,getProfile}=profiles;
-  const row=createResultView({list,T,aiText,resultCleanups,resultUrls,aiCandidates,livePhotos,liveMovies,aiFeatures,refreshHistoryButton,shell,historyStore,previewEnabled,preferences});
+  const row=createResultView({list,T,aiText,resultCleanups,resultUrls,aiCandidates,livePhotos,liveMovies,aiFeatures,refreshHistoryButton,shell,historyStore,previewEnabled,preferences,
+    updateReadyPhoto(id,file){
+      if(readyPhotos.get(id)===(file||undefined))return;
+      if(file)readyPhotos.set(id,file);else readyPhotos.delete(id);
+      saveAllStatus.hidden=true;
+      refreshHistoryButton();
+    },
+  });
   async function restorePersistentHistory(){
     const epoch=historyEpoch;
     const entries=await historyStore.list();
